@@ -3,22 +3,19 @@ const app = express();
 const http = require('http').createServer(app);
 const io = require('socket.io')(http, {
   cors: {
-    origin: "*", 
+    origin: "*",
     methods: ["GET", "POST"]
   }
 });
 
 app.get('/', (req, res) => {
-  res.send('Server ist bereit!');
+  res.send('Chat-Server aktiv!');
 });
 
 io.on('connection', (socket) => {
   socket.on('message', (data) => {
-    io.emit('message', {
-      name: data.name,
-      text: data.text,
-      color: data.color
-    });
+    // Wir senden die Daten 1:1 an alle zurück
+    io.emit('message', data);
   });
 });
 
