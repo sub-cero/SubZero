@@ -1,33 +1,31 @@
 const express = require('express');
+const cors = require('cors');
 const app = express();
 const server = require('http').createServer(app);
 
-const io = require('socket.io')(server, {
-  cors: {
-    origin: true, // Akzeptiert die anfragende Domain automatisch
-    methods: ["GET", "POST"],
-    credentials: true,
-    allowedHeaders: ["Content-Type", "Authorization"]
-  }
+app.use(cors());
+app.use(express.json());
+
+let messages = [];
+
+// Route zum Nachrichten senden
+app.post('/send', (req, res) => {
+    const msg = { 
+        user: req.body.user || 'User', 
+        text: req.body.text, 
+        time: new Date().toLocaleTimeString() 
+    };
+    messages.push(msg);
+    if (messages.length > 50) messages.shift(); // Nur die letzten 50 behalten
+    res.json({ success: true });
 });
 
-// Diese Header sind für Safari lebenswichtig
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', req.header('origin'));
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET,POST');
-  next();
+// Route zum Nachrichten empfangen
+app.get('/messages', (req, res) => {
+    res.json(messages);
 });
 
-app.get('/check', (req, res) => {
-  res.send('VERBINDUNG_OK');
-});
-
-app.get('/', (req, res) => { res.send('SERVER_IS_ALIVE'); });
-
-io.on('connection', (socket) => {
-  socket.on('message', (data) => { io.emit('message', data); });
-});
+app.get('/', (req, res) => res.send('SERVER_IS_ALIVE'));
 
 const PORT = process.env.PORT || 10000;
-server.listen(PORT, '0.0.0.0', () => { console.log('Tunnel online'); });
+server.listen(PORT, '0.0.0.0', () => console.log('HTTP Chat Online'));
