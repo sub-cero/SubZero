@@ -3,27 +3,25 @@ const app = express();
 const server = require('http').createServer(app);
 const io = require('socket.io')(server, {
   cors: {
-    origin: "*", 
-    methods: ["GET", "POST"],
-    credentials: true
+    origin: "*",
+    methods: ["GET", "POST"]
   },
-  allowEIO3: true 
+  transports: ['polling', 'websocket'] 
 });
 
-// Test-Seite
 app.get('/', (req, res) => {
-  res.send('<h1>Server Status: ONLINE</h1><p>Wenn du das siehst, läuft der Server!</p>');
+  res.send('SERVER_IS_ALIVE');
 });
 
 io.on('connection', (socket) => {
-  console.log('Ein User ist verbunden: ' + socket.id);
-  
+  console.log('Verbunden: ' + socket.id);
   socket.on('message', (data) => {
     io.emit('message', data);
   });
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
+// Port-Fix für Render
+const PORT = process.env.PORT || 10000; 
+server.listen(PORT, '0.0.0.0', () => {
   console.log('Server läuft auf Port ' + PORT);
 });
