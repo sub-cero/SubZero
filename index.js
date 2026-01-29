@@ -4,9 +4,8 @@ const server = require('http').createServer(app);
 
 const io = require('socket.io')(server, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"],
-    transports: ['polling']
+    origin: "*", // Erlaubt Zugriff von überall
+    methods: ["GET", "POST"]
   }
 });
 
@@ -15,6 +14,7 @@ app.get('/', (req, res) => {
 });
 
 io.on('connection', (socket) => {
+  console.log('User connected: ' + socket.id);
   socket.on('message', (data) => {
     io.emit('message', data);
   });
@@ -22,5 +22,5 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, '0.0.0.0', () => {
-  console.log('Running...');
+  console.log('Running on port ' + PORT);
 });
