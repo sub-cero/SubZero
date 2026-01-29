@@ -3,20 +3,21 @@ const app = express();
 const server = require('http').createServer(app);
 const io = require('socket.io')(server, {
   cors: {
-    origin: "*", // Erlaubt JEDER Seite den Zugriff
+    origin: "*", 
     methods: ["GET", "POST"],
-    transports: ['websocket', 'polling'],
     credentials: true
   },
-  allowEIO3: true // WICHTIG: Erlaubt ältere Verbindungsarten (oft bei Handys nötig)
+  allowEIO3: true 
 });
 
+// Test-Seite
 app.get('/', (req, res) => {
-  res.send('<h1>Server ist aktiv!</h1>');
+  res.send('<h1>Server Status: ONLINE</h1><p>Wenn du das siehst, läuft der Server!</p>');
 });
 
 io.on('connection', (socket) => {
-  console.log('Nutzer verbunden');
+  console.log('Ein User ist verbunden: ' + socket.id);
+  
   socket.on('message', (data) => {
     io.emit('message', data);
   });
