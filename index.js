@@ -1,29 +1,21 @@
 const express = require('express');
 const app = express();
 const server = require('http').createServer(app);
-
-// WICHTIG: Die CORS-Einstellungen müssen GENAU so hier stehen
 const io = require('socket.io')(server, {
-  cors: {
-    origin: "*", 
-    methods: ["GET", "POST"],
-    credentials: true
-  },
-  allowEIO3: true
+  cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-app.get('/', (req, res) => {
-  res.send('SERVER_IS_ALIVE');
+// Test-Endpunkt
+app.get('/check', (req, res) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.send('VERBINDUNG_OK');
 });
+
+app.get('/', (req, res) => { res.send('SERVER_IS_ALIVE'); });
 
 io.on('connection', (socket) => {
-  console.log('User verbunden: ' + socket.id);
-  socket.on('message', (data) => {
-    io.emit('message', data);
-  });
+  socket.on('message', (data) => { io.emit('message', data); });
 });
 
 const PORT = process.env.PORT || 10000;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log('Server läuft auf Port ' + PORT);
-});
+server.listen(PORT, '0.0.0.0', () => { console.log('Check-Server online'); });
