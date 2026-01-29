@@ -1,25 +1,28 @@
 const express = require('express');
 const app = express();
-const http = require('http').createServer(app);
-const io = require('socket.io')(http, {
+const server = require('http').createServer(app);
+const io = require('socket.io')(server, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
+    origin: "*", // Erlaubt JEDER Seite den Zugriff
+    methods: ["GET", "POST"],
+    transports: ['websocket', 'polling'],
+    credentials: true
+  },
+  allowEIO3: true // WICHTIG: Erlaubt ältere Verbindungsarten (oft bei Handys nötig)
 });
 
 app.get('/', (req, res) => {
-  res.send('Chat-Server aktiv!');
+  res.send('<h1>Server ist aktiv!</h1>');
 });
 
 io.on('connection', (socket) => {
+  console.log('Nutzer verbunden');
   socket.on('message', (data) => {
-    // Wir senden die Daten 1:1 an alle zurück
     io.emit('message', data);
   });
 });
 
 const PORT = process.env.PORT || 3000;
-http.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log('Server läuft auf Port ' + PORT);
 });
