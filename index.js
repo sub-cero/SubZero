@@ -2,14 +2,16 @@ const express = require('express');
 const app = express();
 const server = require('http').createServer(app);
 
-// Socket.io Setup mit expliziten CORS-Regeln für Neocities
+// Maximale Freiheit für die Verbindung von Neocities
 const io = require('socket.io')(server, {
   cors: {
-    origin: ["https://lachelmann.neocities.org", "http://lachelmann.neocities.org"],
+    origin: "*", // Erlaubt JEDER Seite (auch Neocities) den Zugriff
     methods: ["GET", "POST"],
+    allowedHeaders: ["my-custom-header"],
     credentials: true
   },
-  allowEIO3: true // Wichtig für Kompatibilität mit mobilen Browsern
+  allowEIO3: true, // Abwärtskompatibilität für mobile Browser
+  transports: ['polling', 'websocket']
 });
 
 app.get('/', (req, res) => {
@@ -17,22 +19,20 @@ app.get('/', (req, res) => {
 });
 
 io.on('connection', (socket) => {
-  console.log('User verbunden: ' + socket.id);
+  console.log('Verbindung hergestellt: ' + socket.id);
   
   socket.on('message', (data) => {
-    // Zeitstempel hinzufügen
-    const time = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
     io.emit('message', {
-      user: data.user || 'Anonym',
+      user: data.user || 'User',
       text: data.text,
       color: data.color || '#fff',
-      time: time
+      time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
     });
   });
 });
 
-// Render nutzt oft Port 10000 oder den zugewiesenen PORT
+// Port-Zuweisung für Render
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, '0.0.0.0', () => {
-  console.log('Server läuft auf Port ' + PORT);
+  console.log('Chat-Server läuft auf Port ' + PORT);
 });
