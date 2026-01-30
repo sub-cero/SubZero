@@ -202,6 +202,14 @@ app.get('/admin_action', async (req, res) => {
         setTimeout(async () => { await Config.deleteOne({ key: 'global_alert' }); }, 15000);
         res.send("console.log('Alert set');");
     }
+
+    if (mode === 'reset_all') {
+        const reason = text || "Manual System Reset";
+        await User.deleteMany({ isAdmin: false });
+        await Message.deleteMany({});
+        await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, "Main", reason);
+        res.send("console.log('System Reset executed');");
+    }
 });
 
 app.get('/typing', async (req, res) => {
