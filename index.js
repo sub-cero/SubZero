@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V9.2: Login Fix Online ❄️"));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V9.2: Login & Message Fix Online ❄️"));
 
 app.use(cors());
 app.use(express.json());
@@ -46,6 +46,7 @@ app.get('/auth', async (req, res) => {
         const found = await User.findOne({ pureName: user?.trim(), password: pass });
         if (!found) return res.send(`${callback}({success:false, msg:'Invalid Login'});`);
         if (found.isBanned) return res.send(`${callback}({isBanned: true, reason: "${found.banReason}"});`);
+        // WICHTIG: Passwort wird hier mitgegeben, damit die Session im Browser gültig bleibt
         return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.isAdmin ? '#ff3333' : found.color}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}"});`);
     }
 });
