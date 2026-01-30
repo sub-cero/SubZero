@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V12: Admin Commands & Fixes Online ❄️"));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V13: Real-Time Ban System Online ❄️"));
 
 app.use(cors());
 app.use(express.json());
@@ -15,24 +15,26 @@ const UserSchema = new mongoose.Schema({
     password: { type: String },
     color: { type: String },
     isAdmin: { type: Boolean, default: false },
+    isBanned: { type: Boolean, default: false },
     lastIp: String,
     status: { type: String, default: "User" }
 });
 
-const BanSchema = new mongoose.Schema({ ip: String, reason: String });
+const BanSchema = new mongoose.Schema({ ip: String });
 const MessageSchema = new mongoose.Schema({ 
     user: String, text: String, color: String, time: String, 
     status: String, isSystem: { type: Boolean, default: false },
-    isAlert: { type: Boolean, default: false } 
+    isAlert: { type: Boolean, default: false },
+    forUser: { type: String, default: null } // Für private Help-Nachricht
 });
 
 const User = mongoose.model('User', UserSchema);
 const IPBan = mongoose.model('IPBan', BanSchema);
 const Message = mongoose.model('Message', MessageSchema);
 
-async function sysMsg(text, color = "#44ff44", isAlert = false) {
+async function sysMsg(text, color = "#44ff44", isAlert = false, forUser = null) {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    await Message.create({ user: "SYSTEM", text, color, status: "SYS", time, isSystem: true, isAlert });
+    await Message.create({ user: "SYSTEM", text, color, status: "SYS", time, isSystem: true, isAlert, forUser });
 }
 
 app.get('/auth', async (req, res) => {
@@ -40,29 +42,24 @@ app.get('/auth', async (req, res) => {
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     const callback = cb || 'authCB';
 
-    const isBanned = await IPBan.findOne({ ip });
-    if (isBanned) return res.send(`${callback}({success:false, msg:'IP BANNED'});`);
+    const ipBanned = await IPBan.findOne({ ip });
+    if (ipBanned) return res.send(`${callback}({success:false, msg:'IP_BANNED'});`);
 
     if (mode === 'register') {
         try {
             const tag = Math.floor(1000 + Math.random() * 9000).toString();
             const randomColor = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
-            await User.create({ username: `${user}#${tag}`, pureName: user.toLowerCase(), password: pass, color: randomColor, lastIp: ip });
+            await User.create({ username: `${user.trim()}#${tag}`, pureName: user.trim().toLowerCase(), password: pass, color: randomColor, lastIp: ip });
             return res.send(`${callback}({success:true, msg:'Created!'});`);
         } catch(e) { return res.send(`${callback}({success:false, msg:'Username taken'});`); }
     } else {
-        const found = await User.findOne({ pureName: user?.toLowerCase(), password: pass });
+        const found = await User.findOne({ pureName: user?.trim().toLowerCase(), password: pass });
         if (!found) return res.send(`${callback}({success:false, msg:'Login failed'});`);
+        if (found.isBanned) return res.send(`${callback}({success:false, msg:'USER_BANNED'});`);
         
         found.lastIp = ip;
         await found.save();
-
-        if(found.isAdmin) {
-            await sysMsg("⚠️ THE ADMIN IS HERE ⚠️", "#ff0000", true);
-        } else {
-            await sysMsg(`${found.username} joined the room`, "#44ff44");
-        }
-        
+        await sysMsg(found.isAdmin ? "⚠️ THE ADMIN IS HERE ⚠️" : `${found.username} joined`, found.isAdmin ? "#ff0000" : "#44ff44", found.isAdmin);
         return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}"});`);
     }
 });
@@ -72,38 +69,52 @@ app.get('/send_safe', async (req, res) => {
     const sender = await User.findOne({ username: user, password: pass });
     if (!sender) return res.send("console.log('Auth error');");
 
-    // ADMIN BEFEHLE
-    if (sender.isAdmin) {
-        if (text.startsWith('/ipban ')) {
-            const targetName = text.split(' ')[1];
-            const targetUser = await User.findOne({ username: targetName });
-            if (targetUser) {
-                await IPBan.create({ ip: targetUser.lastIp, reason: "Admin" });
-                await sysMsg(`${targetName} was IP-Banned.`, "#ff4444");
-            }
+    if (sender.isAdmin && text.startsWith('/')) {
+        const args = text.split(' ');
+        const cmd = args[0];
+
+        if (cmd === '/help') {
+            const helpText = "Commands: /clear, /ban [Name#ID], /ipban [Name#ID], /unban [IP], /reset";
+            await sysMsg(helpText, "#00d4ff", false, user);
+            return res.send("console.log('Help sent');");
+        }
+        if (cmd === '/clear') {
+            await Message.deleteMany({});
+            await sysMsg("Chat cleared by Admin", "#ffff00");
+            return res.send("console.log('Cleared');");
+        }
+        if (cmd === '/ban') {
+            const target = await User.findOne({ username: args[1] });
+            if(target) { target.isBanned = true; await target.save(); await sysMsg(`${args[1]} was banned!`, "#ffff00"); }
             return res.send("console.log('Banned');");
         }
-        if (text === '/clear') {
+        if (cmd === '/ipban') {
+            const target = await User.findOne({ username: args[1] });
+            if(target) { await IPBan.create({ ip: target.lastIp }); target.isBanned = true; await target.save(); await sysMsg(`${args[1]} IP-Banned!`, "#ffff00"); }
+            return res.send("console.log('IP Banned');");
+        }
+        if (cmd === '/reset') {
+            await User.deleteMany({ isAdmin: false });
             await Message.deleteMany({});
-            await sysMsg("Chat cleared by Admin.", "#ffcc00");
-            return res.send("console.log('Cleared');");
+            await sysMsg("SYSTEM RESET: All users deleted.", "#ff0000");
+            return res.send("console.log('Reset');");
         }
     }
 
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     await Message.create({ user, text, color: sender.color, status: sender.status, time });
-    return res.send("console.log('Sent');");
-});
-
-app.get('/logout_notify', async (req, res) => {
-    const { user } = req.query;
-    if(user) await sysMsg(`${user} left the room`, "#ff4444");
-    res.send("console.log('Logged out');");
+    res.send("console.log('Sent');");
 });
 
 app.get('/messages_jsonp', async (req, res) => {
-    const msgs = await Message.find().sort({ _id: -1 }).limit(50);
-    return res.send(`${req.query.callback}(${JSON.stringify(msgs.reverse())});`);
+    const { user, pass } = req.query;
+    const check = await User.findOne({ username: user, password: pass });
+    
+    // Echtzeit Check: Ist der User noch erlaubt?
+    if (check && (check.isBanned)) return res.send(`${req.query.callback}({banned: true});`);
+    
+    const msgs = await Message.find({ $or: [{ forUser: null }, { forUser: user }] }).sort({ _id: -1 }).limit(50);
+    res.send(`${req.query.callback}(${JSON.stringify(msgs.reverse())});`);
 });
 
 app.listen(process.env.PORT || 10000);
