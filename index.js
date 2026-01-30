@@ -4,13 +4,13 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V14: Admin Power Online ❄️"));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V15: Admin Protection Online 🛡️"));
 
 app.use(cors());
 app.use(express.json());
 
 const UserSchema = new mongoose.Schema({
-    username: { type: String, unique: true }, // Format: Name#1234
+    username: { type: String, unique: true },
     pureName: { type: String, unique: true },
     password: { type: String },
     color: { type: String },
@@ -55,7 +55,9 @@ app.get('/auth', async (req, res) => {
     } else {
         const found = await User.findOne({ pureName: user?.trim().toLowerCase(), password: pass });
         if (!found) return res.send(`${callback}({success:false, msg:'Login failed'});`);
-        if (found.isBanned) return res.send(`${callback}({success:false, msg:'USER_BANNED'});`);
+        
+        // Admins können den User-Ban umgehen, falls sie versehentlich auf der Liste landen
+        if (found.isBanned && !found.isAdmin) return res.send(`${callback}({success:false, msg:'USER_BANNED'});`);
         
         found.lastIp = ip;
         await found.save();
@@ -74,21 +76,29 @@ app.get('/send_safe', async (req, res) => {
         const cmd = args[0];
 
         if (cmd === '/help') {
-            const helpText = "Admin Commands: /clear, /ban [ID] [Reason], /ipban [ID], /unban [ID/IP], /reset";
+            const helpText = "Commands: /clear, /ban [ID] [Reason], /ipban [ID], /unban [ID/IP], /reset";
             await sysMsg(helpText, "#00d4ff", false, user);
             return res.send("console.log('Help sent');");
         }
+        
         if (cmd === '/clear') {
             await Message.deleteMany({});
             await sysMsg("Chat cleared by Admin", "#ffff00");
             return res.send("console.log('Cleared');");
         }
+
         if (cmd === '/ban' || cmd === '/ipban') {
             const targetId = args[1];
             const reason = args.slice(2).join(' ') || "No reason provided";
             const target = await User.findOne({ username: { $regex: new RegExp(targetId, 'i') } });
             
             if(target) {
+                // --- ADMIN SCHUTZ ---
+                if(target.isAdmin) {
+                    await sysMsg("Error: You cannot ban an Admin!", "#ff4444", false, user);
+                    return res.send("console.log('Protect Admin');");
+                }
+                
                 target.isBanned = true;
                 if(cmd === '/ipban') await IPBan.create({ ip: target.lastIp });
                 await target.save();
@@ -96,9 +106,9 @@ app.get('/send_safe', async (req, res) => {
             }
             return res.send("console.log('Banned');");
         }
+
         if (cmd === '/unban') {
             const targetId = args[1];
-            // Sucht User nach ID/Name
             const target = await User.findOne({ username: { $regex: new RegExp(targetId, 'i') } });
             if(target) {
                 target.isBanned = false;
@@ -106,15 +116,16 @@ app.get('/send_safe', async (req, res) => {
                 await IPBan.deleteOne({ ip: target.lastIp });
                 await sysMsg(`${target.username} was unbanned.`, "#ffff00");
             } else {
-                // Falls eine direkte IP eingegeben wurde
                 await IPBan.deleteOne({ ip: targetId });
             }
             return res.send("console.log('Unbanned');");
         }
+
         if (cmd === '/reset') {
+            // Löscht alle, aber lässt Admins in Ruhe
             await User.deleteMany({ isAdmin: false });
             await Message.deleteMany({});
-            await sysMsg("SYSTEM RESET", "#ff0000");
+            await sysMsg("SYSTEM RESET: Only Admins remained.", "#ff0000");
             return res.send("console.log('Reset');");
         }
     }
@@ -124,16 +135,13 @@ app.get('/send_safe', async (req, res) => {
     res.send("console.log('Sent');");
 });
 
-app.get('/logout_notify', async (req, res) => {
-    const { user } = req.query;
-    if(user) await sysMsg(`${user} left the room`, "#ff4444");
-    res.send("console.log('Logged out');");
-});
-
 app.get('/messages_jsonp', async (req, res) => {
     const { user, pass } = req.query;
     const check = await User.findOne({ username: user, password: pass });
-    if (check && check.isBanned) return res.send(`${req.query.callback}({banned: true});`);
+    
+    // Admins ignorieren den Ban-Check für Echtzeit-Screens
+    if (check && check.isBanned && !check.isAdmin) return res.send(`${req.query.callback}({banned: true});`);
+    
     const msgs = await Message.find({ $or: [{ forUser: null }, { forUser: user }] }).sort({ _id: -1 }).limit(50);
     res.send(`${req.query.callback}(${JSON.stringify(msgs.reverse())});`);
 });
