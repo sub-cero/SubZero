@@ -1,72 +1,103 @@
 const express = require('express');
 const cors = require('cors');
+const mongoose = require('mongoose');
 const app = express();
+
+// --- MONGO DB CONNECTION ---
+const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
+
+mongoose.connect(mongoURI)
+    .then(() => console.log("Ice Cold Connection to MongoDB established!"))
+    .catch(err => console.error("Database connection failed:", err));
 
 app.use(cors());
 app.use(express.json());
 
-let messages = [];
-let users = {}; 
-
-// --- ADMIN CONFIGURATION ---
-// Change "123" to your private master password!
-users["admin"] = { password: "123", color: "#ff3333", isAdmin: true };
-
-app.get('/', (req, res) => res.send('SUB_ZERO_V5_STABLE_ONLINE'));
-
-app.get('/check_user', (req, res) => {
-    const { user, cb } = req.query;
-    res.send(`${cb}({available: ${!users[user]}});`);
+// --- DATABASE MODELS ---
+const UserSchema = new mongoose.Schema({
+    username: { type: String, unique: true },
+    password: { type: String },
+    color: { type: String, default: "#00d4ff" },
+    isAdmin: { type: Boolean, default: false }
 });
 
-app.get('/auth', (req, res) => {
+const MessageSchema = new mongoose.Schema({
+    user: String,
+    text: String,
+    color: String,
+    time: String,
+    isAdmin: Boolean
+});
+
+const User = mongoose.model('User', UserSchema);
+const Message = mongoose.model('Message', MessageSchema);
+
+// Admin-Auto-Erstellung (Login: admin / PW: 123)
+async function initAdmin() {
+    try {
+        const adminExists = await User.findOne({ username: 'admin' });
+        if (!adminExists) {
+            await User.create({ username: 'admin', password: '123', color: '#ff3333', isAdmin: true });
+            console.log("Admin account initialized.");
+        }
+    } catch(e) { console.log("Admin check skip..."); }
+}
+initAdmin();
+
+// --- ROUTES ---
+app.get('/check_user', async (req, res) => {
+    const user = await User.findOne({ username: req.query.user });
+    res.send(`${req.query.cb}({available: ${!user}});`);
+});
+
+app.get('/auth', async (req, res) => {
     const { mode, user, pass, cb } = req.query;
     if (mode === 'register') {
-        if (users[user]) return res.send(`${cb}({success:false, msg:'Username taken'});`);
-        users[user] = { password: pass, color: "#00d4ff", isAdmin: false };
-        return res.send(`${cb}({success:true, msg:'Account frozen! Please login.'});`);
+        try {
+            await User.create({ username: user, password: pass });
+            res.send(`${cb}({success:true, msg:'Account created! Please login.'});`);
+        } catch (e) { res.send(`${cb}({success:false, msg:'Username already taken'});`); }
     } else {
-        if (users[user] && users[user].password === pass) {
-            return res.send(`${cb}({success:true, user: "${user}", color: "${users[user].color}", isAdmin: ${users[user].isAdmin}});`);
-        }
-        res.send(`${cb}({success:false, msg:'Wrong credentials'});`);
+        const found = await User.findOne({ username: user, password: pass });
+        if (found) res.send(`${cb}({success:true, user: found.username, color: found.color, isAdmin: found.isAdmin});`);
+        else res.send(`${cb}({success:false, msg:'Wrong credentials'});`);
     }
 });
 
-app.get('/messages_jsonp', (req, res) => {
-    const callback = req.query.callback || 'displayMessages';
-    res.setHeader('Content-Type', 'application/javascript');
-    res.send(`${callback}(${JSON.stringify(messages)});`);
+app.get('/messages_jsonp', async (req, res) => {
+    try {
+        const msgs = await Message.find().sort({ _id: -1 }).limit(100);
+        res.send(`${req.query.callback}(${JSON.stringify(msgs.reverse())});`);
+    } catch(e) { res.send(`${req.query.callback}([]);`); }
 });
 
-app.get('/send_safe', (req, res) => {
+app.get('/send_safe', async (req, res) => {
     const { user, text, color, pass } = req.query;
+    const sender = await User.findOne({ username: user, password: pass });
 
-    // ADMIN COMMANDS
-    if (users[user]?.isAdmin && users[user].password === pass) {
+    if (sender?.isAdmin) {
         if (text === '/clear') {
-            messages = [];
-            return res.send("console.log('Chat cleared');");
+            await Message.deleteMany({});
+            return res.send("console.log('Chat Cleared');");
         }
         if (text === '/reset') {
-            messages = [];
-            users = { "admin": { password: pass, color: "#ff3333", isAdmin: true } };
-            return res.send("console.log('System Hard Reset Done');");
+            await Message.deleteMany({});
+            await User.deleteMany({ isAdmin: false });
+            return res.send("console.log('Hard Reset Done');");
         }
     }
 
-    if (text && users[user] && users[user].password === pass) {
-        messages.push({
+    if (text && sender) {
+        await Message.create({
             user: user,
             text: text,
-            color: users[user].isAdmin ? "#ff3333" : (color || "#00d4ff"),
-            isAdmin: users[user].isAdmin,
+            color: sender.isAdmin ? "#ff3333" : (color || "#00d4ff"),
+            isAdmin: sender.isAdmin,
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         });
-        if (messages.length > 200) messages.shift();
     }
-    res.send("console.log('Processed');");
+    res.send("console.log('Saved to DB');");
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, '0.0.0.0', () => console.log('Ice Server V5 Running'));
+app.listen(PORT, '0.0.0.0', () => console.log('Server V6 Live'));
