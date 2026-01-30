@@ -8,16 +8,15 @@ app.use(express.json());
 let messages = [];
 let users = {}; 
 
-// Admin Account
-users["admin"] = { password: "123", color: "#ff0000", isAdmin: true };
+// --- ADMIN CONFIGURATION ---
+// Change "123" to your private master password!
+users["admin"] = { password: "123", color: "#ff3333", isAdmin: true };
 
-app.get('/', (req, res) => res.send('SUB_ZERO_V4_READY'));
+app.get('/', (req, res) => res.send('SUB_ZERO_V5_STABLE_ONLINE'));
 
-// NEU: Verfügbarkeit prüfen
 app.get('/check_user', (req, res) => {
     const { user, cb } = req.query;
-    const available = !users[user];
-    res.send(`${cb}({available: ${available}});`);
+    res.send(`${cb}({available: ${!users[user]}});`);
 });
 
 app.get('/auth', (req, res) => {
@@ -30,7 +29,7 @@ app.get('/auth', (req, res) => {
         if (users[user] && users[user].password === pass) {
             return res.send(`${cb}({success:true, user: "${user}", color: "${users[user].color}", isAdmin: ${users[user].isAdmin}});`);
         }
-        res.send(`${cb}({success:false, msg:'Access denied'});`);
+        res.send(`${cb}({success:false, msg:'Wrong credentials'});`);
     }
 });
 
@@ -42,10 +41,20 @@ app.get('/messages_jsonp', (req, res) => {
 
 app.get('/send_safe', (req, res) => {
     const { user, text, color, pass } = req.query;
-    if (text === '/clear' && users[user]?.isAdmin && users[user].password === pass) {
-        messages = [];
-        return res.send("console.log('Ice Melted');");
+
+    // ADMIN COMMANDS
+    if (users[user]?.isAdmin && users[user].password === pass) {
+        if (text === '/clear') {
+            messages = [];
+            return res.send("console.log('Chat cleared');");
+        }
+        if (text === '/reset') {
+            messages = [];
+            users = { "admin": { password: pass, color: "#ff3333", isAdmin: true } };
+            return res.send("console.log('System Hard Reset Done');");
+        }
     }
+
     if (text && users[user] && users[user].password === pass) {
         messages.push({
             user: user,
@@ -54,10 +63,10 @@ app.get('/send_safe', (req, res) => {
             isAdmin: users[user].isAdmin,
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         });
-        if (messages.length > 100) messages.shift();
+        if (messages.length > 200) messages.shift();
     }
-    res.send("console.log('Crystalized');");
+    res.send("console.log('Processed');");
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, '0.0.0.0', () => console.log('Ice Server V4 Live'));
+app.listen(PORT, '0.0.0.0', () => console.log('Ice Server V5 Running'));
