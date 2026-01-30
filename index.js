@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V8.1: API Online ❄️"));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V8.2: API Stable ❄️"));
 
 app.use(cors());
 app.use(express.json());
@@ -41,17 +41,18 @@ app.get('/check_user', async (req, res) => {
 app.get('/auth', async (req, res) => {
     const { mode, user, pass, cb } = req.query;
     const callback = cb || 'authCB';
+    const found = await User.findOne({ pureName: user?.trim(), password: pass });
+
     if (mode === 'register') {
         try {
             const tag = Math.floor(1000 + Math.random() * 9000).toString();
             await User.create({ username: `${user.trim()}#${tag}`, pureName: user.trim(), password: pass, tag: tag });
-            res.send(`${callback}({success:true, msg:'Registered! ID: #${tag}'});`);
-        } catch(e) { res.send(`${callback}({success:false, msg:'Username taken'});`); }
+            return res.send(`${callback}({success:true, msg:'Registered! ID: #${tag}'});`);
+        } catch(e) { return res.send(`${callback}({success:false, msg:'Username taken'});`); }
     } else {
-        const found = await User.findOne({ pureName: user.trim(), password: pass });
         if (!found) return res.send(`${callback}({success:false, msg:'Invalid credentials'});`);
         if (found.isBanned) return res.send(`${callback}({isBanned: true, reason: "${found.banReason}"});`);
-        res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color}", isAdmin: ${found.isAdmin}, status: "${found.status}"});`);
+        return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color}", isAdmin: ${found.isAdmin}, status: "${found.status}"});`);
     }
 });
 
@@ -60,7 +61,7 @@ app.get('/messages_jsonp', async (req, res) => {
     if (user) {
         const check = await User.findOne({ username: user });
         if (check && check.isBanned) return res.send(`showBanScreen("${check.banReason}");`);
-        if (check && !check.isBanned) res.send(`hideBanScreen();`);
+        // Falls nicht gebannt, senden wir hier NICHTS extra, sondern lassen den Code weiterlaufen zu den Nachrichten
     }
     const msgs = await Message.find().sort({ _id: -1 }).limit(50);
     res.send(`${callback}(${JSON.stringify(msgs.reverse())});`);
@@ -70,9 +71,6 @@ app.get('/send_safe', async (req, res) => {
     const { user, text, color, pass } = req.query;
     const sender = await User.findOne({ username: user, password: pass });
     if (!sender || sender.isBanned) return res.send("showBanScreen();");
-
-    const now = Date.now();
-    if (!sender.isAdmin && now - sender.lastMsgTime < 3000) return res.send("alert('Slow mode! 3s');");
 
     if (text.startsWith('/')) {
         const p = text.split(' ');
@@ -85,7 +83,6 @@ app.get('/send_safe', async (req, res) => {
         return res.send("console.log('Action done');");
     }
 
-    sender.lastMsgTime = now; await sender.save();
     await Message.create({
         user: user, text: text, color: sender.isAdmin ? "#ff3333" : color,
         isAdmin: sender.isAdmin, status: sender.status,
