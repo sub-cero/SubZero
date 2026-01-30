@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V15: Logout & Admin Protection Active"));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V15: Admin Protection Online 🛡️"));
 
 app.use(cors());
 app.use(express.json());
@@ -25,6 +25,7 @@ const MessageSchema = new mongoose.Schema({
     user: String, text: String, color: String, time: String, 
     status: String, isSystem: { type: Boolean, default: false },
     isAlert: { type: Boolean, default: false },
+    isReset: { type: Boolean, default: false },
     forUser: { type: String, default: null } 
 });
 
@@ -32,17 +33,15 @@ const User = mongoose.model('User', UserSchema);
 const IPBan = mongoose.model('IPBan', BanSchema);
 const Message = mongoose.model('Message', MessageSchema);
 
-async function sysMsg(text, color = "#44ff44", isAlert = false, forUser = null) {
+async function sysMsg(text, color = "#44ff44", isAlert = false, forUser = null, isReset = false) {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    await Message.create({ user: "SYSTEM", text, color, status: "SYS", time, isSystem: true, isAlert, forUser });
+    await Message.create({ user: "SYSTEM", text, color, status: "SYS", time, isSystem: true, isAlert, forUser, isReset });
 }
 
 app.get('/logout_notify', async (req, res) => {
     const { user } = req.query;
-    if (user) {
-        await sysMsg(`${user} left the room.`, "#ff4444");
-    }
-    res.send("console.log('Logout recorded');");
+    if (user) await sysMsg(`${user} left the room.`, "#ff4444");
+    res.send("console.log('Logout logged');");
 });
 
 app.get('/auth', async (req, res) => {
@@ -83,7 +82,7 @@ app.get('/send_safe', async (req, res) => {
         const cmd = args[0];
 
         if (cmd === '/help') {
-            const helpText = "Commands: /clear, /ban [ID], /ipban [ID], /unban [ID/IP], /reset";
+            const helpText = "Commands: /clear, /ban [ID] [Reason], /ipban [ID], /unban [ID/IP], /reset";
             await sysMsg(helpText, "#00d4ff", false, user);
             return res.send("console.log('Help sent');");
         }
@@ -96,12 +95,18 @@ app.get('/send_safe', async (req, res) => {
 
         if (cmd === '/ban' || cmd === '/ipban') {
             const targetId = args[1];
+            const reason = args.slice(2).join(' ') || "No reason provided";
             const target = await User.findOne({ username: { $regex: new RegExp(targetId, 'i') } });
-            if(target && !target.isAdmin) {
+            
+            if(target) {
+                if(target.isAdmin) {
+                    await sysMsg("Error: You cannot ban an Admin!", "#ff4444", false, user);
+                    return res.send("console.log('Protect Admin');");
+                }
                 target.isBanned = true;
                 if(cmd === '/ipban') await IPBan.create({ ip: target.lastIp });
                 await target.save();
-                await sysMsg(`${target.username} was banned.`, "#ffff00");
+                await sysMsg(`${target.username} was banned. Reason: ${reason}`, "#ffff00");
             }
             return res.send("console.log('Banned');");
         }
@@ -114,6 +119,8 @@ app.get('/send_safe', async (req, res) => {
                 await target.save();
                 await IPBan.deleteOne({ ip: target.lastIp });
                 await sysMsg(`${target.username} was unbanned.`, "#ffff00");
+            } else {
+                await IPBan.deleteOne({ ip: targetId });
             }
             return res.send("console.log('Unbanned');");
         }
@@ -121,7 +128,7 @@ app.get('/send_safe', async (req, res) => {
         if (cmd === '/reset') {
             await User.deleteMany({ isAdmin: false });
             await Message.deleteMany({});
-            await sysMsg("SYSTEM RESET: Only Admins remained.", "#ff0000");
+            await sysMsg("SYSTEM RESET: Only Admins remained.", "#ff0000", true, null, true);
             return res.send("console.log('Reset');");
         }
     }
@@ -134,7 +141,9 @@ app.get('/send_safe', async (req, res) => {
 app.get('/messages_jsonp', async (req, res) => {
     const { user, pass } = req.query;
     const check = await User.findOne({ username: user, password: pass });
+    
     if (check && check.isBanned && !check.isAdmin) return res.send(`${req.query.callback}({banned: true});`);
+    
     const msgs = await Message.find({ $or: [{ forUser: null }, { forUser: user }] }).sort({ _id: -1 }).limit(50);
     res.send(`${req.query.callback}(${JSON.stringify(msgs.reverse())});`);
 });
