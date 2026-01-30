@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V8.4: Fixed Auth ❄️"));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V8.5: English Edition Online ❄️"));
 
 app.use(cors());
 app.use(express.json());
@@ -49,11 +49,11 @@ app.get('/auth', async (req, res) => {
                 username: `${user.trim()}#${tag}`, pureName: user.trim(), 
                 password: pass, tag: tag, color: getRandomIceColor() 
             });
-            return res.send(`${callback}({success:true, msg:'Account erstellt! ID: #${tag}'});`);
-        } catch(e) { return res.send(`${callback}({success:false, msg:'Name vergeben'});`); }
+            return res.send(`${callback}({success:true, msg:'Account created! ID: #${tag}'});`);
+        } catch(e) { return res.send(`${callback}({success:false, msg:'Username taken'});`); }
     } else {
         const found = await User.findOne({ pureName: user?.trim(), password: pass });
-        if (!found) return res.send(`${callback}({success:false, msg:'Login fehlgeschlagen'});`);
+        if (!found) return res.send(`${callback}({success:false, msg:'Invalid Login'});`);
         if (found.isBanned) return res.send(`${callback}({isBanned: true, reason: "${found.banReason}"});`);
         return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.isAdmin ? '#ff3333' : found.color}", isAdmin: ${found.isAdmin}, status: "${found.status}"});`);
     }
@@ -64,9 +64,10 @@ app.get('/messages_jsonp', async (req, res) => {
     if (user) {
         const check = await User.findOne({ username: user });
         if (check && check.isBanned) return res.send(`showBanScreen("${check.banReason}");`);
-        if (check && !check.isBanned) return res.send(`hideBanScreen(); request("${req.originalUrl.replace('user=', 'old=')}");`);
+        if (check && !check.isBanned) res.send(`hideBanScreen();`); 
     }
     const msgs = await Message.find().sort({ _id: -1 }).limit(50);
+    // Send only the data array to the callback
     res.send(`${callback}(${JSON.stringify(msgs.reverse())});`);
 });
 
@@ -80,11 +81,11 @@ app.get('/send_safe', async (req, res) => {
     if (text.startsWith('/')) {
         const p = text.split(' ');
         let sMsg = "";
-        if (p[0] === '/status') { sender.status = p.slice(1).join(' ').substring(0, 20); await sender.save(); sMsg = "Status aktualisiert"; }
+        if (p[0] === '/status') { sender.status = p.slice(1).join(' ').substring(0, 20); await sender.save(); sMsg = "Status updated"; }
         if (sender.isAdmin) {
-            if (p[0] === '/ban') { await User.findOneAndUpdate({ tag: p[1] }, { isBanned: true, banReason: p.slice(2).join(' ') }); sMsg = "User gebannt"; }
-            if (p[0] === '/unban') { await User.findOneAndUpdate({ tag: p[1] }, { isBanned: false }); sMsg = "User entbannt"; }
-            if (p[0] === '/clear') { await Message.deleteMany({}); sMsg = "Chat geleert"; }
+            if (p[0] === '/ban') { await User.findOneAndUpdate({ tag: p[1] }, { isBanned: true, banReason: p.slice(2).join(' ') }); sMsg = "User banned"; }
+            if (p[0] === '/unban') { await User.findOneAndUpdate({ tag: p[1] }, { isBanned: false }); sMsg = "User unbanned"; }
+            if (p[0] === '/clear') { await Message.deleteMany({}); sMsg = "Chat cleared"; }
         }
         if(sMsg) await Message.create({ user: "SYSTEM", text: sMsg, color: "#ffff00", time, status: "SYS" });
         return res.send("console.log('OK');");
