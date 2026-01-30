@@ -18,7 +18,8 @@ const UserSchema = new mongoose.Schema({
     isBanned: { type: Boolean, default: false },
     lastIp: String,
     status: { type: String, default: "User" },
-    lastSeen: { type: Number, default: 0 } 
+    lastSeen: { type: Number, default: 0 },
+    isOnlineNotify: { type: Boolean, default: false } // Hilfsfeld für Join/Leave Status
 });
 
 const BanSchema = new mongoose.Schema({ ip: String });
@@ -59,9 +60,27 @@ async function sysMsg(text, color = "#44ff44", isAlert = false, forUser = null, 
     await Message.create({ user: "SYSTEM", text, color, status: "SYS", time, isSystem: true, isAlert, forUser, isReset, room });
 }
 
+// NEU: Hintergrund-Checker für Offline-User (alle 30 Sek)
+setInterval(async () => {
+    const minuteAgo = Date.now() - 60000;
+    // Finde User, die vor über einer Minute das letzte Mal gesehen wurden und noch als "online" markiert sind
+    const lostUsers = await User.find({ lastSeen: { $lt: minuteAgo }, isOnlineNotify: true });
+    
+    for (let u of lostUsers) {
+        await sysMsg(`${u.username} left the room.`, "#ff4444", false, null, false, "Main");
+        u.isOnlineNotify = false;
+        await u.save();
+    }
+}, 30000);
+
 app.get('/logout_notify', async (req, res) => {
     const { user, room } = req.query;
-    if (user) await sysMsg(`${user} left the room.`, "#ff4444", false, null, false, room || "Main");
+    const found = await User.findOne({ username: user });
+    if (found) {
+        await sysMsg(`${found.username} left the room.`, "#ff4444", false, null, false, room || "Main");
+        found.isOnlineNotify = false;
+        await found.save();
+    }
     res.send("console.log('Logout logged');");
 });
 
@@ -70,11 +89,10 @@ app.get('/auth', async (req, res) => {
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     const callback = cb || 'authCB';
     
-    // NEU: Echtzeit-Check für Verfügbarkeit & Validierung
     if (mode === 'check') {
         const pureName = user?.trim().toLowerCase();
         const existing = await User.findOne({ pureName });
-        const isValid = /^[a-zA-Z0-9]{5,}$/.test(user || ""); // Min 5 Zeichen, keine Sonderzeichen
+        const isValid = /^[a-zA-Z0-9]{5,}$/.test(user || ""); 
         return res.send(`${callback}(${JSON.stringify({ taken: !!existing, valid: isValid })});`);
     }
 
@@ -114,9 +132,14 @@ app.get('/auth', async (req, res) => {
         
         found.lastIp = ip;
         found.lastSeen = Date.now();
-        await found.save();
         
-        await sysMsg(found.isAdmin ? `${found.username}` : `${found.username} joined`, found.isAdmin ? "#ff0000" : "#44ff44", found.isAdmin);
+        // Sende Join-Nachricht nur, wenn User vorher als offline galt
+        if (!found.isOnlineNotify) {
+            await sysMsg(found.isAdmin ? `${found.username}` : `${found.username} joined`, found.isAdmin ? "#ff0000" : "#44ff44", found.isAdmin);
+            found.isOnlineNotify = true;
+        }
+        
+        await found.save();
         return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}"});`);
     }
 });
@@ -259,7 +282,7 @@ app.get('/check_updates', async (req, res) => {
     const onlineList = await User.find({ lastSeen: { $gt: minuteAgo } }, 'username');
     const onlineFriends = onlineList.map(f => f.username);
 
-    // Prüfe auf Reset-Nachricht
+    // Prüfe auf Reset-Nachricht für Echtzeit-Logout
     const resetMsg = await Message.findOne({ isReset: true }).sort({ _id: -1 });
 
     let dmCount = 0;
