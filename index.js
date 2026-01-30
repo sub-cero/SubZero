@@ -8,24 +8,29 @@ app.use(express.json());
 let messages = [];
 let users = {}; 
 
-// Admin Account - ÄNDERE DAS PASSWORT!
+// Admin Account
 users["admin"] = { password: "123", color: "#ff0000", isAdmin: true };
 
-app.get('/', (req, res) => res.send('SUB_ZERO_SERVER_V3_COLD'));
+app.get('/', (req, res) => res.send('SUB_ZERO_V4_READY'));
+
+// NEU: Verfügbarkeit prüfen
+app.get('/check_user', (req, res) => {
+    const { user, cb } = req.query;
+    const available = !users[user];
+    res.send(`${cb}({available: ${available}});`);
+});
 
 app.get('/auth', (req, res) => {
     const { mode, user, pass, cb } = req.query;
-    if (!user || !pass) return res.send(`${cb}({success:false, msg:'Input fehlt'});`);
-    
     if (mode === 'register') {
-        if (users[user]) return res.send(`${cb}({success:false, msg:'Name besetzt'});`);
+        if (users[user]) return res.send(`${cb}({success:false, msg:'Username taken'});`);
         users[user] = { password: pass, color: "#00d4ff", isAdmin: false };
-        return res.send(`${cb}({success:true, msg:'Eingefroren! Log dich ein.'});`);
+        return res.send(`${cb}({success:true, msg:'Account frozen! Please login.'});`);
     } else {
         if (users[user] && users[user].password === pass) {
             return res.send(`${cb}({success:true, user: "${user}", color: "${users[user].color}", isAdmin: ${users[user].isAdmin}});`);
         }
-        res.send(`${cb}({success:false, msg:'Zugriff verweigert'});`);
+        res.send(`${cb}({success:false, msg:'Access denied'});`);
     }
 });
 
@@ -37,12 +42,10 @@ app.get('/messages_jsonp', (req, res) => {
 
 app.get('/send_safe', (req, res) => {
     const { user, text, color, pass } = req.query;
-    
     if (text === '/clear' && users[user]?.isAdmin && users[user].password === pass) {
         messages = [];
         return res.send("console.log('Ice Melted');");
     }
-
     if (text && users[user] && users[user].password === pass) {
         messages.push({
             user: user,
@@ -57,4 +60,4 @@ app.get('/send_safe', (req, res) => {
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, '0.0.0.0', () => console.log('Ice Server Live'));
+app.listen(PORT, '0.0.0.0', () => console.log('Ice Server V4 Live'));
