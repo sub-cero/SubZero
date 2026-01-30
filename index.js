@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V11: Stability Fix Online ❄️"));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V12: Admin Commands & Fixes Online ❄️"));
 
 app.use(cors());
 app.use(express.json());
@@ -20,15 +20,19 @@ const UserSchema = new mongoose.Schema({
 });
 
 const BanSchema = new mongoose.Schema({ ip: String, reason: String });
-const MessageSchema = new mongoose.Schema({ user: String, text: String, color: String, time: String, status: String, isSystem: { type: Boolean, default: false } });
+const MessageSchema = new mongoose.Schema({ 
+    user: String, text: String, color: String, time: String, 
+    status: String, isSystem: { type: Boolean, default: false },
+    isAlert: { type: Boolean, default: false } 
+});
 
 const User = mongoose.model('User', UserSchema);
 const IPBan = mongoose.model('IPBan', BanSchema);
 const Message = mongoose.model('Message', MessageSchema);
 
-async function sysMsg(text) {
+async function sysMsg(text, color = "#44ff44", isAlert = false) {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    await Message.create({ user: "SYSTEM", text, color: "#44ff44", status: "SYS", time, isSystem: true });
+    await Message.create({ user: "SYSTEM", text, color, status: "SYS", time, isSystem: true, isAlert });
 }
 
 app.get('/auth', async (req, res) => {
@@ -49,8 +53,16 @@ app.get('/auth', async (req, res) => {
     } else {
         const found = await User.findOne({ pureName: user?.toLowerCase(), password: pass });
         if (!found) return res.send(`${callback}({success:false, msg:'Login failed'});`);
+        
         found.lastIp = ip;
         await found.save();
+
+        if(found.isAdmin) {
+            await sysMsg("⚠️ THE ADMIN IS HERE ⚠️", "#ff0000", true);
+        } else {
+            await sysMsg(`${found.username} joined the room`, "#44ff44");
+        }
+        
         return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}"});`);
     }
 });
@@ -60,19 +72,33 @@ app.get('/send_safe', async (req, res) => {
     const sender = await User.findOne({ username: user, password: pass });
     if (!sender) return res.send("console.log('Auth error');");
 
-    if (sender.isAdmin && text.startsWith('/ipban ')) {
-        const targetName = text.split(' ')[1];
-        const targetUser = await User.findOne({ username: targetName });
-        if (targetUser) {
-            await IPBan.create({ ip: targetUser.lastIp, reason: "Admin" });
-            await sysMsg(`${targetName} IP-Banned`);
-            return res.send("console.log('OK');"); // RETURN verhindert Doppel-Antwort
+    // ADMIN BEFEHLE
+    if (sender.isAdmin) {
+        if (text.startsWith('/ipban ')) {
+            const targetName = text.split(' ')[1];
+            const targetUser = await User.findOne({ username: targetName });
+            if (targetUser) {
+                await IPBan.create({ ip: targetUser.lastIp, reason: "Admin" });
+                await sysMsg(`${targetName} was IP-Banned.`, "#ff4444");
+            }
+            return res.send("console.log('Banned');");
+        }
+        if (text === '/clear') {
+            await Message.deleteMany({});
+            await sysMsg("Chat cleared by Admin.", "#ffcc00");
+            return res.send("console.log('Cleared');");
         }
     }
 
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     await Message.create({ user, text, color: sender.color, status: sender.status, time });
     return res.send("console.log('Sent');");
+});
+
+app.get('/logout_notify', async (req, res) => {
+    const { user } = req.query;
+    if(user) await sysMsg(`${user} left the room`, "#ff4444");
+    res.send("console.log('Logged out');");
 });
 
 app.get('/messages_jsonp', async (req, res) => {
