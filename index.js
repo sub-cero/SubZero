@@ -74,8 +74,9 @@ app.get('/delete', async (req, res) => {
     const { id, user, pass } = req.query;
     const admin = await User.findOne({ username: user, password: pass, isAdmin: true });
     if (admin) {
-        await Message.findByIdAndDelete(id);
-        res.send("console.log('Deleted');");
+        // Findet die Nachricht und überschreibt den Text, statt sie zu löschen
+        await Message.findByIdAndUpdate(id, { text: "DELETED_BY_ADMIN" });
+        res.send("console.log('Marked as deleted');");
     } else {
         res.send("console.log('Unauthorized');");
     }
