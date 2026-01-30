@@ -1,13 +1,13 @@
 {
-  "name": "subzero-chat-server",
+  "name": "subzero-chat",
   "version": "1.0.0",
-  "description": "Echtzeit Chat-Server für Neocities",
   "main": "index.js",
-  "scripts": {
-    "start": "node index.js"
-  },
   "dependencies": {
     "express": "^4.18.2",
-    "socket.io": "^4.7.2"
+    "cors": "^2.8.5",
+    "mongoose": "^8.0.0"
+  },
+  "scripts": {
+    "start": "node index.js"
   }
 }
