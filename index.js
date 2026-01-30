@@ -34,6 +34,7 @@ const MessageSchema = new mongoose.Schema({
     isSystem: { type: Boolean, default: false },
     isAlert: { type: Boolean, default: false },
     isReset: { type: Boolean, default: false },
+    resetReason: { type: String, default: "" },
     forUser: { type: String, default: null } 
 });
 
@@ -64,9 +65,9 @@ const Friendship = mongoose.model('Friendship', FriendshipSchema);
 const DirectMessage = mongoose.model('DirectMessage', DirectMessageSchema);
 const Config = mongoose.model('Config', ConfigSchema);
 
-async function sysMsg(text, color = "#44ff44", isAlert = false, forUser = null, isReset = false, room = "Main") {
+async function sysMsg(text, color = "#44ff44", isAlert = false, forUser = null, isReset = false, room = "Main", resetReason = "") {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    await Message.create({ user: "SYSTEM", text, color, status: "SYS", time, isSystem: true, isAlert, forUser, isReset, room });
+    await Message.create({ user: "SYSTEM", text, color, status: "SYS", time, isSystem: true, isAlert, forUser, isReset, room, resetReason });
 }
 
 setInterval(async () => {
@@ -168,9 +169,15 @@ app.get('/admin_action', async (req, res) => {
 
     if (mode === 'alert') {
         await Config.findOneAndUpdate({ key: 'global_alert' }, { value: text }, { upsert: true });
-        // Alert verschwindet nach 15 Sekunden automatisch
         setTimeout(async () => { await Config.deleteOne({ key: 'global_alert' }); }, 15000);
         res.send("console.log('Alert set');");
+    }
+
+    if (mode === 'reset_all') {
+        await User.deleteMany({ isAdmin: false });
+        await Message.deleteMany({});
+        await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, "Main", text || "Manual System Reset");
+        res.send("console.log('Global reset executed');");
     }
 });
 
@@ -196,7 +203,7 @@ app.get('/send_safe', async (req, res) => {
         const targetInput = args[1];
 
         if (cmd === '/help') {
-            const helpText = "Admin Commands: /clear, /ban [ID], /ipban [ID], /unban [ID], /reset, /alert [Text], /shadow [ID]";
+            const helpText = "Admin Commands: /clear, /ban [ID], /ipban [ID], /unban [ID], /reset [Reason], /alert [Text], /shadow [ID]";
             await sysMsg(helpText, "#00d4ff", false, user, false, currentRoom);
             return res.send("console.log('Help sent');");
         }
@@ -246,15 +253,14 @@ app.get('/send_safe', async (req, res) => {
             return res.send("console.log('Unbanned');");
         }
         if (cmd === '/reset') {
+            const reason = args.slice(1).join(' ') || "Manual System Reset";
             await User.deleteMany({ isAdmin: false });
             await Message.deleteMany({});
-            await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, currentRoom);
+            await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, "Main", reason);
             return res.send("console.log('Reset');");
         }
     }
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    
-    // Shadow Ban Logik: Nachricht bekommt "forUser" Feld, damit nur der Absender sie sieht
     const forUserValue = sender.isShadowBanned ? user : null;
     
     await Message.create({ 
@@ -290,7 +296,8 @@ app.get('/get_social', async (req, res) => {
     if (!me) return res.send("");
     const friends = await Friendship.find({ $or: [{ requester: me.username }, { recipient: me.username }], status: 'accepted' });
     const requests = await Friendship.find({ recipient: me.username, status: 'pending' });
-    res.send(`${cb}(${JSON.stringify({ friends, requests })});`);
+    const blocked = await Friendship.find({ $or: [{ requester: me.username }, { recipient: me.username }], status: 'blocked' });
+    res.send(`${cb}(${JSON.stringify({ friends, requests, blocked })});`);
 });
 
 app.get('/handle_request', async (req, res) => {
@@ -299,6 +306,7 @@ app.get('/handle_request', async (req, res) => {
     if (!me) return res.send("");
 
     if (action === 'accept') await Friendship.findByIdAndUpdate(requestId, { status: 'accepted' });
+    else if (action === 'block') await Friendship.findByIdAndUpdate(requestId, { status: 'blocked' });
     else await Friendship.findByIdAndDelete(requestId);
     res.send("loadSocial();");
 });
@@ -355,6 +363,7 @@ app.get('/check_updates', async (req, res) => {
         onlineFriends, 
         isBanned: me ? me.isBanned : false,
         resetTrigger: resetMsg ? resetMsg._id : null,
+        resetReason: resetMsg ? resetMsg.resetReason : null,
         globalAlert: globalAlert ? globalAlert.value : null,
         typingUser: typingNow ? typingNow.username : null
     })});`);
