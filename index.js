@@ -120,6 +120,10 @@ app.get('/auth', async (req, res) => {
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     const callback = cb || 'authCB';
     
+    // IP Ban Check für alle Auth-Aktionen (Check, Login, Register)
+    const ipBanned = await IPBan.findOne({ ip });
+    if (ipBanned) return res.send(`${callback}({success:false, msg:'IP_BANNED', isBanned: true});`);
+
     if (mode === 'check') {
         const pureName = user?.trim().toLowerCase();
         const existing = await User.findOne({ pureName });
@@ -127,9 +131,6 @@ app.get('/auth', async (req, res) => {
         return res.send(`${callback}(${JSON.stringify({ taken: !!existing, valid: isValid })});`);
     }
 
-    const ipBanned = await IPBan.findOne({ ip });
-    if (ipBanned) return res.send(`${callback}({success:false, msg:'Your IP is permanently banned.', isBanned: true});`);
-    
     if (mode === 'register') {
         const validate = (str) => /^[a-zA-Z0-9]{5,}$/.test(str);
         if (!validate(user) || !validate(pass)) {
@@ -207,7 +208,7 @@ app.get('/admin_action', async (req, res) => {
     }
 
     if (mode === 'reset_all' || mode === 'reset') {
-        const reason = text || "Manual System Reset";
+        const reason = text || "No reason specified";
         await User.deleteMany({ isAdmin: false });
         await Message.deleteMany({});
         await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, "Main", reason);
@@ -279,7 +280,11 @@ app.get('/send_safe', async (req, res) => {
                     duration = duration + " min";
                 }
 
-                if(cmd === '/ipban') await IPBan.create({ ip: target.lastIp });
+                if(cmd === '/ipban') {
+                    // Falls IP bereits existiert, nicht doppelt anlegen
+                    const exists = await IPBan.findOne({ ip: target.lastIp });
+                    if(!exists) await IPBan.create({ ip: target.lastIp });
+                }
                 await target.save();
                 await sysMsg(`${target.username} was banned (${duration}).`, "#ffff00", false, null, false, currentRoom);
             }
@@ -293,7 +298,7 @@ app.get('/send_safe', async (req, res) => {
                 target.isShadowBanned = false;
                 target.banExpires = 0;
                 await target.save();
-                await IPBan.deleteOne({ ip: target.lastIp });
+                await IPBan.deleteMany({ ip: target.lastIp });
                 await sysMsg(`${target.username} was unbanned.`, "#44ff44", false, null, false, currentRoom);
             }
             return res.send("console.log('Unbanned');");
@@ -341,9 +346,14 @@ app.get('/get_social', async (req, res) => {
     const me = await User.findOne({ username: user, password: pass });
     if (!me) return res.send("");
     const friends = await Friendship.find({ $or: [{ requester: me.username }, { recipient: me.username }], status: 'accepted' });
+    const friendsList = friends.map(f => ({
+        _id: f._id,
+        requester: f.requester,
+        recipient: f.recipient
+    }));
     const requests = await Friendship.find({ recipient: me.username, status: 'pending' });
     const blocked = await Friendship.find({ $or: [{ requester: me.username }, { recipient: me.username }], status: 'blocked' });
-    res.send(`${cb}(${JSON.stringify({ friends, requests, blocked })});`);
+    res.send(`${cb}(${JSON.stringify({ friends: friendsList, requests, blocked })});`);
 });
 
 app.get('/handle_request', async (req, res) => {
