@@ -128,7 +128,7 @@ app.get('/auth', async (req, res) => {
     }
 
     const ipBanned = await IPBan.findOne({ ip });
-    if (ipBanned) return res.send(`${callback}({success:false, msg:'IP_BANNED'});`);
+    if (ipBanned) return res.send(`${callback}({success:false, msg:'Your IP is permanently banned.', isBanned: true});`);
     
     if (mode === 'register') {
         const validate = (str) => /^[a-zA-Z0-9]{5,}$/.test(str);
@@ -167,7 +167,7 @@ app.get('/auth', async (req, res) => {
                 await found.save();
             } else {
                 const timeLeft = getBanString(found.banExpires);
-                return res.send(`${callback}({success:false, msg: 'BAN: ${timeLeft}'});`);
+                return res.send(`${callback}({success:false, msg: 'BAN: ${timeLeft}', isBanned: true});`);
             }
         }
         
@@ -299,7 +299,7 @@ app.get('/send_safe', async (req, res) => {
             return res.send("console.log('Unbanned');");
         }
         if (cmd === '/reset') {
-            const reason = args.slice(1).join(' ') || "Manual System Reset";
+            const reason = args.slice(1).join(' ') || "No reason specified";
             await User.deleteMany({ isAdmin: false });
             await Message.deleteMany({});
             await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, "Main", reason);
@@ -380,6 +380,11 @@ app.get('/get_dms', async (req, res) => {
 
 app.get('/check_updates', async (req, res) => {
     const { callback, user, room } = req.query;
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    
+    // IP Ban Check
+    const ipBanned = await IPBan.findOne({ ip });
+    
     const me = user ? await User.findOne({ username: user }) : null;
     if (me) await User.findOneAndUpdate({ username: user }, { lastSeen: Date.now() });
 
@@ -407,8 +412,8 @@ app.get('/check_updates', async (req, res) => {
         counts, 
         dmCount, 
         onlineFriends, 
-        isBanned: (me && me.isBanned && (me.banExpires === 0 || Date.now() < me.banExpires)),
-        banTimeLeft: me ? getBanString(me.banExpires) : null,
+        isBanned: !!ipBanned || (me && me.isBanned && (me.banExpires === 0 || Date.now() < me.banExpires)),
+        banTimeLeft: me ? getBanString(me.banExpires) : (ipBanned ? "PERMANENT (IP)" : null),
         resetTrigger: resetMsg ? resetMsg._id : null,
         resetReason: resetMsg ? resetMsg.resetReason : null,
         globalAlert: globalAlert ? globalAlert.value : null,
