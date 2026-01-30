@@ -4,12 +4,11 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V10: IP-Ban & Security Online ❄️"));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V11: Stability Fix Online ❄️"));
 
 app.use(cors());
 app.use(express.json());
 
-// Datenmodelle
 const UserSchema = new mongoose.Schema({
     username: { type: String, unique: true },
     pureName: { type: String, unique: true },
@@ -27,7 +26,6 @@ const User = mongoose.model('User', UserSchema);
 const IPBan = mongoose.model('IPBan', BanSchema);
 const Message = mongoose.model('Message', MessageSchema);
 
-// System Nachricht senden
 async function sysMsg(text) {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     await Message.create({ user: "SYSTEM", text, color: "#44ff44", status: "SYS", time, isSystem: true });
@@ -39,22 +37,20 @@ app.get('/auth', async (req, res) => {
     const callback = cb || 'authCB';
 
     const isBanned = await IPBan.findOne({ ip });
-    if (isBanned) return res.send(`${callback}({success:false, msg:'Your IP is permanently banned.'});`);
+    if (isBanned) return res.send(`${callback}({success:false, msg:'IP BANNED'});`);
 
     if (mode === 'register') {
         try {
             const tag = Math.floor(1000 + Math.random() * 9000).toString();
             const randomColor = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
             await User.create({ username: `${user}#${tag}`, pureName: user.toLowerCase(), password: pass, color: randomColor, lastIp: ip });
-            return res.send(`${callback}({success:true, msg:'Account created!'});`);
-        } catch(e) { return res.send(`${callback}({success:false, msg:'Error: Username taken'});`); }
+            return res.send(`${callback}({success:true, msg:'Created!'});`);
+        } catch(e) { return res.send(`${callback}({success:false, msg:'Username taken'});`); }
     } else {
         const found = await User.findOne({ pureName: user?.toLowerCase(), password: pass });
-        if (!found) return res.send(`${callback}({success:false, msg:'Invalid Credentials'});`);
-        
+        if (!found) return res.send(`${callback}({success:false, msg:'Login failed'});`);
         found.lastIp = ip;
         await found.save();
-        await sysMsg(`${found.username} joined.`);
         return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}"});`);
     }
 });
@@ -64,33 +60,24 @@ app.get('/send_safe', async (req, res) => {
     const sender = await User.findOne({ username: user, password: pass });
     if (!sender) return res.send("console.log('Auth error');");
 
-    // Befehle: /ipban [username]
     if (sender.isAdmin && text.startsWith('/ipban ')) {
         const targetName = text.split(' ')[1];
         const targetUser = await User.findOne({ username: targetName });
         if (targetUser) {
-            await IPBan.create({ ip: targetUser.lastIp, reason: "Admin Ban" });
-            await sysMsg(`${targetName} was IP-Banned.`);
-            return res.send("console.log('Banned');");
+            await IPBan.create({ ip: targetUser.lastIp, reason: "Admin" });
+            await sysMsg(`${targetName} IP-Banned`);
+            return res.send("console.log('OK');"); // RETURN verhindert Doppel-Antwort
         }
-    }
-    
-    // Befehl: /unban [ip]
-    if (sender.isAdmin && text.startsWith('/unban ')) {
-        const targetIp = text.split(' ')[1];
-        await IPBan.deleteOne({ ip: targetIp });
-        await sysMsg(`IP ${targetIp} unbanned.`);
-        return res.send("console.log('Unbanned');");
     }
 
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     await Message.create({ user, text, color: sender.color, status: sender.status, time });
-    res.send("console.log('Sent');");
+    return res.send("console.log('Sent');");
 });
 
 app.get('/messages_jsonp', async (req, res) => {
     const msgs = await Message.find().sort({ _id: -1 }).limit(50);
-    res.send(`${req.query.callback}(${JSON.stringify(msgs.reverse())});`);
+    return res.send(`${req.query.callback}(${JSON.stringify(msgs.reverse())});`);
 });
 
 app.listen(process.env.PORT || 10000);
