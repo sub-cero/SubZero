@@ -16,6 +16,7 @@ const UserSchema = new mongoose.Schema({
     color: { type: String },
     isAdmin: { type: Boolean, default: false },
     isBanned: { type: Boolean, default: false },
+    isShadowBanned: { type: Boolean, default: false },
     lastIp: String,
     status: { type: String, default: "User" },
     lastSeen: { type: Number, default: 0 },
@@ -167,7 +168,8 @@ app.get('/admin_action', async (req, res) => {
 
     if (mode === 'alert') {
         await Config.findOneAndUpdate({ key: 'global_alert' }, { value: text }, { upsert: true });
-        setTimeout(async () => { await Config.deleteOne({ key: 'global_alert' }); }, 10000);
+        // Alert verschwindet nach 15 Sekunden automatisch
+        setTimeout(async () => { await Config.deleteOne({ key: 'global_alert' }); }, 15000);
         res.send("console.log('Alert set');");
     }
 });
@@ -194,9 +196,24 @@ app.get('/send_safe', async (req, res) => {
         const targetInput = args[1];
 
         if (cmd === '/help') {
-            const helpText = "Commands: /clear, /ban [ID], /ipban [ID], /unban [ID], /reset";
+            const helpText = "Admin Commands: /clear, /ban [ID], /ipban [ID], /unban [ID], /reset, /alert [Text], /shadow [ID]";
             await sysMsg(helpText, "#00d4ff", false, user, false, currentRoom);
             return res.send("console.log('Help sent');");
+        }
+        if (cmd === '/alert') {
+            const alertMsg = args.slice(1).join(' ');
+            await Config.findOneAndUpdate({ key: 'global_alert' }, { value: alertMsg }, { upsert: true });
+            setTimeout(async () => { await Config.deleteOne({ key: 'global_alert' }); }, 15000);
+            return res.send("console.log('Alert via command set');");
+        }
+        if (cmd === '/shadow') {
+            const target = await User.findOne({ username: { $regex: `#${targetInput}$` } });
+            if(target && !target.isAdmin) {
+                target.isShadowBanned = !target.isShadowBanned;
+                await target.save();
+                await sysMsg(`Shadow status for ${target.username} toggled.`, "#ff00ff", false, user, false, currentRoom);
+            }
+            return res.send("console.log('Shadow ban toggled');");
         }
         if (cmd === '/clear') {
             await Message.deleteMany({ room: currentRoom });
@@ -221,6 +238,7 @@ app.get('/send_safe', async (req, res) => {
             const target = await User.findOne({ username: { $regex: `#${targetInput}$` } });
             if(target) {
                 target.isBanned = false;
+                target.isShadowBanned = false;
                 await target.save();
                 await IPBan.deleteOne({ ip: target.lastIp });
                 await sysMsg(`${target.username} was unbanned.`, "#44ff44", false, null, false, currentRoom);
@@ -235,7 +253,19 @@ app.get('/send_safe', async (req, res) => {
         }
     }
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    await Message.create({ user, text, color: sender.color, status: sender.status, time, room: currentRoom });
+    
+    // Shadow Ban Logik: Nachricht bekommt "forUser" Feld, damit nur der Absender sie sieht
+    const forUserValue = sender.isShadowBanned ? user : null;
+    
+    await Message.create({ 
+        user, 
+        text, 
+        color: sender.color, 
+        status: sender.status, 
+        time, 
+        room: currentRoom,
+        forUser: forUserValue 
+    });
     res.send("console.log('Sent');");
 });
 
