@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V9.1: Fixed Headers & English ❄️"));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V9.2: Fixed & Online ❄️"));
 
 app.use(cors());
 app.use(express.json());
@@ -28,11 +28,6 @@ const MessageSchema = new mongoose.Schema({
 const User = mongoose.model('User', UserSchema);
 const Message = mongoose.model('Message', MessageSchema);
 
-function getRandomIceColor() {
-    const colors = ["#00d4ff", "#00ffcc", "#0080ff", "#00ffff", "#a0fbff", "#44ff44", "#ffff00", "#ff00ff"];
-    return colors[Math.floor(Math.random() * colors.length)];
-}
-
 app.get('/check_user', async (req, res) => {
     const exists = await User.findOne({ pureName: req.query.user?.trim() });
     return res.send(`${req.query.cb || 'console.log'}({available: ${!exists}});`);
@@ -44,7 +39,7 @@ app.get('/auth', async (req, res) => {
     if (mode === 'register') {
         try {
             const tag = Math.floor(1000 + Math.random() * 9000).toString();
-            await User.create({ username: `${user.trim()}#${tag}`, pureName: user.trim(), password: pass, tag: tag, color: getRandomIceColor() });
+            await User.create({ username: `${user.trim()}#${tag}`, pureName: user.trim(), password: pass, tag: tag, color: "#00d4ff" });
             return res.send(`${callback}({success:true, msg:'Account created! ID: #${tag}'});`);
         } catch(e) { return res.send(`${callback}({success:false, msg:'Username taken'});`); }
     } else {
@@ -74,19 +69,12 @@ app.get('/send_safe', async (req, res) => {
 
     if (text.startsWith('/')) {
         const p = text.split(' ');
-        let sMsg = "";
-        if (p[0] === '/status') { sender.status = p.slice(1).join(' ').substring(0, 20); await sender.save(); sMsg = "Status updated"; }
-        if (sender.isAdmin) {
-            if (p[0] === '/ban') { await User.findOneAndUpdate({ tag: p[1] }, { isBanned: true, banReason: p.slice(2).join(' ') }); sMsg = "User banned"; }
-            if (p[0] === '/unban') { await User.findOneAndUpdate({ tag: p[1] }, { isBanned: false }); sMsg = "User unbanned"; }
-            if (p[0] === '/clear') { await Message.deleteMany({}); sMsg = "Chat cleared"; }
-        }
-        if(sMsg) await Message.create({ user: "SYSTEM", text: sMsg, color: "#ffff00", time, status: "SYS" });
-        return res.send("console.log('Command OK');");
+        if (sender.isAdmin && p[0] === '/clear') await Message.deleteMany({});
+        return res.send("console.log('Command Processed');");
     }
 
     await Message.create({ user, text, color: sender.isAdmin ? "#ff3333" : sender.color, status: sender.status, time });
-    return res.send("console.log('Message Sent');");
+    return res.send("console.log('Sent');");
 });
 
 app.listen(process.env.PORT || 10000, '0.0.0.0');
