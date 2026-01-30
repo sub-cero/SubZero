@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V15: Multi-Room System Online 🛡️"));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V15: Admin Power + Dots Online 🛡️"));
 
 app.use(cors());
 app.use(express.json());
@@ -50,10 +50,8 @@ app.get('/auth', async (req, res) => {
     const { mode, user, pass, cb } = req.query;
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     const callback = cb || 'authCB';
-
     const ipBanned = await IPBan.findOne({ ip });
     if (ipBanned) return res.send(`${callback}({success:false, msg:'IP_BANNED'});`);
-
     if (mode === 'register') {
         try {
             const tag = Math.floor(1000 + Math.random() * 9000).toString();
@@ -64,13 +62,22 @@ app.get('/auth', async (req, res) => {
     } else {
         const found = await User.findOne({ pureName: user?.trim().toLowerCase(), password: pass });
         if (!found) return res.send(`${callback}({success:false, msg:'Login failed'});`);
-        
         if (found.isBanned && !found.isAdmin) return res.send(`${callback}({success:false, msg:'USER_BANNED'});`);
-        
         found.lastIp = ip;
         await found.save();
         await sysMsg(found.isAdmin ? "⚠️ THE ADMIN IS HERE ⚠️" : `${found.username} joined`, found.isAdmin ? "#ff0000" : "#44ff44", found.isAdmin);
         return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}"});`);
+    }
+});
+
+app.get('/delete', async (req, res) => {
+    const { id, user, pass } = req.query;
+    const admin = await User.findOne({ username: user, password: pass, isAdmin: true });
+    if (admin) {
+        await Message.findByIdAndDelete(id);
+        res.send("console.log('Deleted');");
+    } else {
+        res.send("console.log('Unauthorized');");
     }
 });
 
@@ -79,28 +86,23 @@ app.get('/send_safe', async (req, res) => {
     const currentRoom = room || "Main";
     const sender = await User.findOne({ username: user, password: pass });
     if (!sender) return res.send("console.log('Auth error');");
-
     if (sender.isAdmin && text.startsWith('/')) {
         const args = text.split(' ');
         const cmd = args[0];
-
         if (cmd === '/help') {
             const helpText = "Commands: /clear, /ban [ID] [Reason], /ipban [ID], /unban [ID/IP], /reset";
             await sysMsg(helpText, "#00d4ff", false, user, false, currentRoom);
             return res.send("console.log('Help sent');");
         }
-        
         if (cmd === '/clear') {
             await Message.deleteMany({ room: currentRoom });
             await sysMsg("Chat cleared by Admin", "#ffff00", false, null, false, currentRoom);
             return res.send("console.log('Cleared');");
         }
-
         if (cmd === '/ban' || cmd === '/ipban') {
             const targetId = args[1];
             const reason = args.slice(2).join(' ') || "No reason provided";
             const target = await User.findOne({ username: { $regex: new RegExp(targetId, 'i') } });
-            
             if(target) {
                 if(target.isAdmin) {
                     await sysMsg("Error: You cannot ban an Admin!", "#ff4444", false, user, false, currentRoom);
@@ -113,7 +115,6 @@ app.get('/send_safe', async (req, res) => {
             }
             return res.send("console.log('Banned');");
         }
-
         if (cmd === '/unban') {
             const targetId = args[1];
             const target = await User.findOne({ username: { $regex: new RegExp(targetId, 'i') } });
@@ -127,7 +128,6 @@ app.get('/send_safe', async (req, res) => {
             }
             return res.send("console.log('Unbanned');");
         }
-
         if (cmd === '/reset') {
             await User.deleteMany({ isAdmin: false });
             await Message.deleteMany({});
@@ -135,19 +135,26 @@ app.get('/send_safe', async (req, res) => {
             return res.send("console.log('Reset');");
         }
     }
-
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     await Message.create({ user, text, color: sender.color, status: sender.status, time, room: currentRoom });
     res.send("console.log('Sent');");
+});
+
+app.get('/check_updates', async (req, res) => {
+    const { callback } = req.query;
+    const rooms = ["Main", "Love", "Find friends", "Beef"];
+    const counts = {};
+    for (let r of rooms) {
+        counts[r] = await Message.countDocuments({ room: r });
+    }
+    res.send(`${callback}(${JSON.stringify(counts)});`);
 });
 
 app.get('/messages_jsonp', async (req, res) => {
     const { user, pass, room } = req.query;
     const currentRoom = room || "Main";
     const check = await User.findOne({ username: user, password: pass });
-    
     if (check && check.isBanned && !check.isAdmin) return res.send(`${req.query.callback}({banned: true});`);
-    
     const msgs = await Message.find({ room: currentRoom, $or: [{ forUser: null }, { forUser: user }] }).sort({ _id: -1 }).limit(50);
     res.send(`${req.query.callback}(${JSON.stringify(msgs.reverse())});`);
 });
