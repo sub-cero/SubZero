@@ -19,7 +19,9 @@ const UserSchema = new mongoose.Schema({
     lastIp: String,
     status: { type: String, default: "User" },
     lastSeen: { type: Number, default: 0 },
-    isOnlineNotify: { type: Boolean, default: false } // Hilfsfeld für Join/Leave Status
+    isOnlineNotify: { type: Boolean, default: false },
+    typingAt: { type: Number, default: 0 },
+    typingRoom: { type: String, default: "" }
 });
 
 const BanSchema = new mongoose.Schema({ ip: String });
@@ -49,21 +51,25 @@ const DirectMessageSchema = new mongoose.Schema({
     seen: { type: Boolean, default: false }
 });
 
+const ConfigSchema = new mongoose.Schema({
+    key: String,
+    value: String
+});
+
 const User = mongoose.model('User', UserSchema);
 const IPBan = mongoose.model('IPBan', BanSchema);
 const Message = mongoose.model('Message', MessageSchema);
 const Friendship = mongoose.model('Friendship', FriendshipSchema);
 const DirectMessage = mongoose.model('DirectMessage', DirectMessageSchema);
+const Config = mongoose.model('Config', ConfigSchema);
 
 async function sysMsg(text, color = "#44ff44", isAlert = false, forUser = null, isReset = false, room = "Main") {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     await Message.create({ user: "SYSTEM", text, color, status: "SYS", time, isSystem: true, isAlert, forUser, isReset, room });
 }
 
-// NEU: Hintergrund-Checker für Offline-User (alle 30 Sek)
 setInterval(async () => {
     const minuteAgo = Date.now() - 60000;
-    // Finde User, die vor über einer Minute das letzte Mal gesehen wurden und noch als "online" markiert sind
     const lostUsers = await User.find({ lastSeen: { $lt: minuteAgo }, isOnlineNotify: true });
     
     for (let u of lostUsers) {
@@ -133,7 +139,6 @@ app.get('/auth', async (req, res) => {
         found.lastIp = ip;
         found.lastSeen = Date.now();
         
-        // Sende Join-Nachricht nur, wenn User vorher als offline galt
         if (!found.isOnlineNotify) {
             await sysMsg(found.isAdmin ? `${found.username}` : `${found.username} joined`, found.isAdmin ? "#ff0000" : "#44ff44", found.isAdmin);
             found.isOnlineNotify = true;
@@ -155,6 +160,24 @@ app.get('/delete', async (req, res) => {
     }
 });
 
+app.get('/admin_action', async (req, res) => {
+    const { mode, text, user, pass } = req.query;
+    const admin = await User.findOne({ username: user, password: pass, isAdmin: true });
+    if (!admin) return res.send("console.log('Denied');");
+
+    if (mode === 'alert') {
+        await Config.findOneAndUpdate({ key: 'global_alert' }, { value: text }, { upsert: true });
+        setTimeout(async () => { await Config.deleteOne({ key: 'global_alert' }); }, 10000);
+        res.send("console.log('Alert set');");
+    }
+});
+
+app.get('/typing', async (req, res) => {
+    const { user, room } = req.query;
+    await User.findOneAndUpdate({ username: user }, { typingAt: Date.now(), typingRoom: room });
+    res.send("console.log('Typing...');");
+});
+
 app.get('/send_safe', async (req, res) => {
     const { user, text, pass, room } = req.query;
     const currentRoom = room || "Main";
@@ -162,6 +185,8 @@ app.get('/send_safe', async (req, res) => {
     
     if (!sender) return res.send("console.log('Auth error');");
     if (sender.isBanned && !sender.isAdmin) return res.send("console.log('Banned');");
+
+    await User.findOneAndUpdate({ username: user }, { typingAt: 0 });
     
     if (sender.isAdmin && text.startsWith('/')) {
         const args = text.split(' ');
@@ -205,7 +230,6 @@ app.get('/send_safe', async (req, res) => {
         if (cmd === '/reset') {
             await User.deleteMany({ isAdmin: false });
             await Message.deleteMany({});
-            // WICHTIG: Erzeugt resetTrigger ID für das Frontend
             await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, currentRoom);
             return res.send("console.log('Reset');");
         }
@@ -253,6 +277,7 @@ app.get('/send_dm', async (req, res) => {
     const { user, pass, target, text } = req.query;
     const me = await User.findOne({ username: user, password: pass });
     if (me && !me.isBanned) {
+        await User.findOneAndUpdate({ username: user }, { typingAt: 0 });
         const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         await DirectMessage.create({ sender: me.username, receiver: target, text, time, color: me.color });
     }
@@ -270,7 +295,7 @@ app.get('/get_dms', async (req, res) => {
 });
 
 app.get('/check_updates', async (req, res) => {
-    const { callback, user } = req.query;
+    const { callback, user, room } = req.query;
     const me = user ? await User.findOne({ username: user }) : null;
     if (me) await User.findOneAndUpdate({ username: user }, { lastSeen: Date.now() });
 
@@ -282,8 +307,14 @@ app.get('/check_updates', async (req, res) => {
     const onlineList = await User.find({ lastSeen: { $gt: minuteAgo } }, 'username');
     const onlineFriends = onlineList.map(f => f.username);
 
-    // Prüfe auf Reset-Nachricht für Echtzeit-Logout
+    const typingNow = await User.findOne({ 
+        typingAt: { $gt: Date.now() - 3000 }, 
+        typingRoom: room,
+        username: { $ne: user }
+    });
+
     const resetMsg = await Message.findOne({ isReset: true }).sort({ _id: -1 });
+    const globalAlert = await Config.findOne({ key: 'global_alert' });
 
     let dmCount = 0;
     if (user) dmCount = await DirectMessage.countDocuments({ receiver: user, seen: false });
@@ -293,7 +324,9 @@ app.get('/check_updates', async (req, res) => {
         dmCount, 
         onlineFriends, 
         isBanned: me ? me.isBanned : false,
-        resetTrigger: resetMsg ? resetMsg._id : null
+        resetTrigger: resetMsg ? resetMsg._id : null,
+        globalAlert: globalAlert ? globalAlert.value : null,
+        typingUser: typingNow ? typingNow.username : null
     })});`);
 });
 
