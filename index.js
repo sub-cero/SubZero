@@ -70,14 +70,21 @@ app.get('/auth', async (req, res) => {
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     const callback = cb || 'authCB';
     
+    // NEU: Echtzeit-Check für Verfügbarkeit & Validierung
+    if (mode === 'check') {
+        const pureName = user?.trim().toLowerCase();
+        const existing = await User.findOne({ pureName });
+        const isValid = /^[a-zA-Z0-9]{5,}$/.test(user || ""); // Min 5 Zeichen, keine Sonderzeichen
+        return res.send(`${callback}(${JSON.stringify({ taken: !!existing, valid: isValid })});`);
+    }
+
     const ipBanned = await IPBan.findOne({ ip });
     if (ipBanned) return res.send(`${callback}({success:false, msg:'IP_BANNED'});`);
     
     if (mode === 'register') {
-        // Validierung nur bei Registrierung
-        const validate = (str) => /^[a-zA-Z0-9]{3,}$/.test(str);
+        const validate = (str) => /^[a-zA-Z0-9]{5,}$/.test(str);
         if (!validate(user) || !validate(pass)) {
-            return res.send(`${callback}({success:false, msg:'Min. 3 chars, no special characters!'});`);
+            return res.send(`${callback}({success:false, msg:'Min. 5 chars, no special characters!'});`);
         }
         if (pass !== passConfirm) {
             return res.send(`${callback}({success:false, msg:'Passwords do not match!'});`);
@@ -101,7 +108,6 @@ app.get('/auth', async (req, res) => {
             return res.send(`${callback}({success:true, msg:'Created! Please login now.'});`);
         } catch(e) { return res.send(`${callback}({success:false, msg:'Error during registration'});`); }
     } else {
-        // Login: Keine Längenbeschränkung für Admin-Passwörter (z.B. 123)
         const found = await User.findOne({ pureName: user?.trim().toLowerCase(), password: pass });
         if (!found) return res.send(`${callback}({success:false, msg:'Login failed'});`);
         if (found.isBanned && !found.isAdmin) return res.send(`${callback}({success:false, msg:'USER_BANNED'});`);
@@ -176,8 +182,8 @@ app.get('/send_safe', async (req, res) => {
         if (cmd === '/reset') {
             await User.deleteMany({ isAdmin: false });
             await Message.deleteMany({});
-            // Erzeugt eine Nachricht mit isReset: true für den globalen Logout
-            await sysMsg("SYSTEM RESET: All users logged out.", "#ff0000", true, null, true, currentRoom);
+            // WICHTIG: Erzeugt resetTrigger ID für das Frontend
+            await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, currentRoom);
             return res.send("console.log('Reset');");
         }
     }
@@ -253,7 +259,7 @@ app.get('/check_updates', async (req, res) => {
     const onlineList = await User.find({ lastSeen: { $gt: minuteAgo } }, 'username');
     const onlineFriends = onlineList.map(f => f.username);
 
-    // Prüfe, ob eine Reset-Nachricht existiert (für Frontend Logout-Trigger)
+    // Prüfe auf Reset-Nachricht
     const resetMsg = await Message.findOne({ isReset: true }).sort({ _id: -1 });
 
     let dmCount = 0;
