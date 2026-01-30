@@ -68,7 +68,10 @@ const Config = mongoose.model('Config', ConfigSchema);
 
 async function sysMsg(text, color = "#44ff44", isAlert = false, forUser = null, isReset = false, room = "Main", resetReason = "") {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    await Message.create({ user: "SYSTEM", text, color, status: "SYS", time, isSystem: true, isAlert, forUser, isReset, room, resetReason });
+    await Message.create({ 
+        user: "SYSTEM", text, color, status: "SYS", time, 
+        isSystem: true, isAlert, forUser, isReset, room, resetReason 
+    });
 }
 
 function getBanString(expires) {
@@ -203,7 +206,7 @@ app.get('/admin_action', async (req, res) => {
         res.send("console.log('Alert set');");
     }
 
-    if (mode === 'reset_all') {
+    if (mode === 'reset_all' || mode === 'reset') {
         const reason = text || "Manual System Reset";
         await User.deleteMany({ isAdmin: false });
         await Message.deleteMany({});
@@ -231,7 +234,6 @@ app.get('/send_safe', async (req, res) => {
     if (sender.isAdmin && text.startsWith('/')) {
         const args = text.split(' ');
         const cmd = args[0].toLowerCase();
-        const targetInput = args[1];
 
         if (cmd === '/help') {
             const helpText = "Admin: /clear, /ban [ID] [Min], /ipban [ID], /unban [ID], /reset [Reason], /alert [Text], /shadow [ID]";
@@ -245,6 +247,7 @@ app.get('/send_safe', async (req, res) => {
             return res.send("console.log('Alert via command set');");
         }
         if (cmd === '/shadow') {
+            const targetInput = args[1];
             const target = await User.findOne({ username: { $regex: `#${targetInput}$` } });
             if(target && !target.isAdmin) {
                 target.isShadowBanned = !target.isShadowBanned;
@@ -259,6 +262,7 @@ app.get('/send_safe', async (req, res) => {
             return res.send("console.log('Cleared');");
         }
         if (cmd === '/ban' || cmd === '/ipban') {
+            const targetInput = args[1];
             const target = await User.findOne({ username: { $regex: `#${targetInput}$` } });
             let duration = parseInt(args[2]);
             if(target) {
@@ -282,6 +286,7 @@ app.get('/send_safe', async (req, res) => {
             return res.send("console.log('Banned');");
         }
         if (cmd === '/unban') {
+            const targetInput = args[1];
             const target = await User.findOne({ username: { $regex: `#${targetInput}$` } });
             if(target) {
                 target.isBanned = false;
