@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V16: Online-Status & Messenger Active ❄️"));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V16: System Online ❄️"));
 
 app.use(cors());
 app.use(express.json());
@@ -61,7 +61,7 @@ async function sysMsg(text, color = "#44ff44", isAlert = false, forUser = null, 
 
 app.get('/logout_notify', async (req, res) => {
     const { user, room } = req.query;
-    if (user) await sysMsg(`${user} left the room.`, "#666666", false, null, false, room || "Main");
+    if (user) await sysMsg(`${user} left the room.`, "#ff4444", false, null, false, room || "Main");
     res.send("console.log('Logout logged');");
 });
 
@@ -105,7 +105,7 @@ app.get('/auth', async (req, res) => {
         found.lastSeen = Date.now();
         await found.save();
         
-        await sysMsg(found.isAdmin ? `${found.username}` : `${found.username} joined`, found.isAdmin ? "#ff0000" : "#666666", found.isAdmin);
+        await sysMsg(found.isAdmin ? `${found.username}` : `${found.username} joined`, found.isAdmin ? "#ff0000" : "#44ff44", found.isAdmin);
         return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}"});`);
     }
 });
@@ -132,8 +132,10 @@ app.get('/send_safe', async (req, res) => {
     if (sender.isAdmin && text.startsWith('/')) {
         const args = text.split(' ');
         const cmd = args[0].toLowerCase();
+        const targetInput = args[1];
+
         if (cmd === '/help') {
-            const helpText = "Commands: /clear, /ban [Name#1234], /ipban [Name#1234], /unban [Name#1234], /reset";
+            const helpText = "Commands: /clear, /ban [ID], /ipban [ID], /unban [ID], /reset";
             await sysMsg(helpText, "#00d4ff", false, user, false, currentRoom);
             return res.send("console.log('Help sent');");
         }
@@ -143,9 +145,7 @@ app.get('/send_safe', async (req, res) => {
             return res.send("console.log('Cleared');");
         }
         if (cmd === '/ban' || cmd === '/ipban') {
-            const targetId = args[1];
-            const reason = args.slice(2).join(' ') || "No reason provided";
-            const target = await User.findOne({ username: targetId });
+            const target = await User.findOne({ username: { $regex: `#${targetInput}$` } });
             if(target) {
                 if(target.isAdmin) {
                     await sysMsg("Error: You cannot ban an Admin!", "#ff4444", false, user, false, currentRoom);
@@ -154,18 +154,17 @@ app.get('/send_safe', async (req, res) => {
                 target.isBanned = true;
                 if(cmd === '/ipban') await IPBan.create({ ip: target.lastIp });
                 await target.save();
-                await sysMsg(`${target.username} was banned. Reason: ${reason}`, "#ffff00", false, null, false, currentRoom);
+                await sysMsg(`${target.username} was banned.`, "#ffff00", false, null, false, currentRoom);
             }
             return res.send("console.log('Banned');");
         }
         if (cmd === '/unban') {
-            const targetId = args[1];
-            const target = await User.findOne({ username: targetId });
+            const target = await User.findOne({ username: { $regex: `#${targetInput}$` } });
             if(target) {
                 target.isBanned = false;
                 await target.save();
                 await IPBan.deleteOne({ ip: target.lastIp });
-                await sysMsg(`${target.username} was unbanned.`, "#ffff00", false, null, false, currentRoom);
+                await sysMsg(`${target.username} was unbanned.`, "#44ff44", false, null, false, currentRoom);
             }
             return res.send("console.log('Unbanned');");
         }
@@ -237,7 +236,8 @@ app.get('/get_dms', async (req, res) => {
 
 app.get('/check_updates', async (req, res) => {
     const { callback, user } = req.query;
-    if (user) await User.findOneAndUpdate({ username: user }, { lastSeen: Date.now() });
+    const me = user ? await User.findOne({ username: user }) : null;
+    if (me) await User.findOneAndUpdate({ username: user }, { lastSeen: Date.now() });
 
     const rooms = ["Main", "Love", "Find friends", "Beef"];
     const counts = {};
@@ -250,7 +250,7 @@ app.get('/check_updates', async (req, res) => {
     let dmCount = 0;
     if (user) dmCount = await DirectMessage.countDocuments({ receiver: user, seen: false });
     
-    res.send(`${callback}(${JSON.stringify({ counts, dmCount, onlineFriends })});`);
+    res.send(`${callback}(${JSON.stringify({ counts, dmCount, onlineFriends, isBanned: me ? me.isBanned : false })});`);
 });
 
 app.get('/messages_jsonp', async (req, res) => {
