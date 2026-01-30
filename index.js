@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V8.6: Messages Fixed ❄️"));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V9: Server Online ❄️"));
 
 app.use(cors());
 app.use(express.json());
@@ -44,7 +44,10 @@ app.get('/auth', async (req, res) => {
     if (mode === 'register') {
         try {
             const tag = Math.floor(1000 + Math.random() * 9000).toString();
-            await User.create({ username: `${user.trim()}#${tag}`, pureName: user.trim(), password: pass, tag: tag, color: getRandomIceColor() });
+            await User.create({ 
+                username: `${user.trim()}#${tag}`, pureName: user.trim(), 
+                password: pass, tag: tag, color: getRandomIceColor() 
+            });
             return res.send(`${callback}({success:true, msg:'Account created! ID: #${tag}'});`);
         } catch(e) { return res.send(`${callback}({success:false, msg:'Username taken'});`); }
     } else {
@@ -60,10 +63,10 @@ app.get('/messages_jsonp', async (req, res) => {
     if (user) {
         const check = await User.findOne({ username: user });
         if (check && check.isBanned) return res.send(`showBanScreen("${check.banReason}");`);
+        if (check && !check.isBanned) res.send(`hideBanScreen();`); 
     }
     const msgs = await Message.find().sort({ _id: -1 }).limit(50);
-    const dataString = JSON.stringify(msgs.reverse());
-    res.send(`${callback}(${dataString});`);
+    res.send(`${callback}(${JSON.stringify(msgs.reverse())});`);
 });
 
 app.get('/send_safe', async (req, res) => {
