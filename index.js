@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V8.3: Stable & Colorful ❄️"));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V8.4: Fixed Auth ❄️"));
 
 app.use(cors());
 app.use(express.json());
@@ -22,44 +22,40 @@ const UserSchema = new mongoose.Schema({
 });
 
 const MessageSchema = new mongoose.Schema({
-    user: String, text: String, color: String, time: String, status: String, isSystem: { type: Boolean, default: false }
+    user: String, text: String, color: String, time: String, status: String
 });
 
 const User = mongoose.model('User', UserSchema);
 const Message = mongoose.model('Message', MessageSchema);
 
-// Hilfsfunktion für Zufallsfarben (kein Rot)
 function getRandomIceColor() {
     const colors = ["#00d4ff", "#00ffcc", "#0080ff", "#00ffff", "#a0fbff", "#44ff44", "#ffff00", "#ff00ff"];
     return colors[Math.floor(Math.random() * colors.length)];
 }
 
 app.get('/check_user', async (req, res) => {
-    const cb = req.query.cb || 'console.log';
-    const exists = await User.findOne({ pureName: req.query.user.trim() });
-    res.send(`${cb}({available: ${!exists}});`);
+    const exists = await User.findOne({ pureName: req.query.user?.trim() });
+    res.send(`${req.query.cb || 'console.log'}({available: ${!exists}});`);
 });
 
 app.get('/auth', async (req, res) => {
     const { mode, user, pass, cb } = req.query;
     const callback = cb || 'authCB';
+    
     if (mode === 'register') {
         try {
             const tag = Math.floor(1000 + Math.random() * 9000).toString();
             await User.create({ 
-                username: `${user.trim()}#${tag}`, 
-                pureName: user.trim(), 
-                password: pass, 
-                tag: tag,
-                color: getRandomIceColor() // Random Farbe bei Registrierung
+                username: `${user.trim()}#${tag}`, pureName: user.trim(), 
+                password: pass, tag: tag, color: getRandomIceColor() 
             });
-            return res.send(`${callback}({success:true, msg:'Registered! ID: #${tag}'});`);
-        } catch(e) { return res.send(`${callback}({success:false, msg:'Username taken'});`); }
+            return res.send(`${callback}({success:true, msg:'Account erstellt! ID: #${tag}'});`);
+        } catch(e) { return res.send(`${callback}({success:false, msg:'Name vergeben'});`); }
     } else {
         const found = await User.findOne({ pureName: user?.trim(), password: pass });
-        if (!found) return res.send(`${callback}({success:false, msg:'Invalid login'});`);
+        if (!found) return res.send(`${callback}({success:false, msg:'Login fehlgeschlagen'});`);
         if (found.isBanned) return res.send(`${callback}({isBanned: true, reason: "${found.banReason}"});`);
-        return res.send(`${callback}({success:true, user: "${found.username}", color: found.isAdmin ? "#ff3333" : found.color, isAdmin: found.isAdmin, status: found.status});`);
+        return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.isAdmin ? '#ff3333' : found.color}", isAdmin: ${found.isAdmin}, status: "${found.status}"});`);
     }
 });
 
@@ -68,7 +64,7 @@ app.get('/messages_jsonp', async (req, res) => {
     if (user) {
         const check = await User.findOne({ username: user });
         if (check && check.isBanned) return res.send(`showBanScreen("${check.banReason}");`);
-        if (check && !check.isBanned) res.send(`hideBanScreen();`); // Echtzeit-Check für Unban
+        if (check && !check.isBanned) return res.send(`hideBanScreen(); request("${req.originalUrl.replace('user=', 'old=')}");`);
     }
     const msgs = await Message.find().sort({ _id: -1 }).limit(50);
     res.send(`${callback}(${JSON.stringify(msgs.reverse())});`);
@@ -83,38 +79,18 @@ app.get('/send_safe', async (req, res) => {
 
     if (text.startsWith('/')) {
         const p = text.split(' ');
-        let systemText = "";
-
-        if (p[0] === '/status') {
-            sender.status = p.slice(1).join(' ').substring(0, 20);
-            await sender.save();
-            systemText = `Status geändert zu: ${sender.status}`;
-        }
+        let sMsg = "";
+        if (p[0] === '/status') { sender.status = p.slice(1).join(' ').substring(0, 20); await sender.save(); sMsg = "Status aktualisiert"; }
         if (sender.isAdmin) {
-            if (p[0] === '/ban') {
-                const target = await User.findOneAndUpdate({ tag: p[1] }, { isBanned: true, banReason: p.slice(2).join(' ') || "No reason" });
-                systemText = `User ${target ? target.username : p[1]} wurde gebannt.`;
-            }
-            if (p[0] === '/unban') {
-                const target = await User.findOneAndUpdate({ tag: p[1] }, { isBanned: false });
-                systemText = `User ${target ? target.username : p[1]} wurde entbannt.`;
-            }
-            if (p[0] === '/clear') {
-                await Message.deleteMany({});
-                systemText = "Chat wurde geleert.";
-            }
+            if (p[0] === '/ban') { await User.findOneAndUpdate({ tag: p[1] }, { isBanned: true, banReason: p.slice(2).join(' ') }); sMsg = "User gebannt"; }
+            if (p[0] === '/unban') { await User.findOneAndUpdate({ tag: p[1] }, { isBanned: false }); sMsg = "User entbannt"; }
+            if (p[0] === '/clear') { await Message.deleteMany({}); sMsg = "Chat geleert"; }
         }
-
-        if (systemText) {
-            await Message.create({ user: "SYSTEM", text: systemText, color: "#ffff00", time, isSystem: true });
-        }
-        return res.send("console.log('Cmd executed');");
+        if(sMsg) await Message.create({ user: "SYSTEM", text: sMsg, color: "#ffff00", time, status: "SYS" });
+        return res.send("console.log('OK');");
     }
 
-    await Message.create({
-        user: user, text: text, color: sender.isAdmin ? "#ff3333" : sender.color,
-        status: sender.status, time
-    });
+    await Message.create({ user, text, color: sender.isAdmin ? "#ff3333" : sender.color, status: sender.status, time });
     res.send("console.log('Sent');");
 });
 
