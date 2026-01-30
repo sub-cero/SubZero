@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V9.2: Fixed & Online ❄️"));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V9.2: Login Fix Online ❄️"));
 
 app.use(cors());
 app.use(express.json());
@@ -46,7 +46,7 @@ app.get('/auth', async (req, res) => {
         const found = await User.findOne({ pureName: user?.trim(), password: pass });
         if (!found) return res.send(`${callback}({success:false, msg:'Invalid Login'});`);
         if (found.isBanned) return res.send(`${callback}({isBanned: true, reason: "${found.banReason}"});`);
-        return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.isAdmin ? '#ff3333' : found.color}", isAdmin: ${found.isAdmin}, status: "${found.status}"});`);
+        return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.isAdmin ? '#ff3333' : found.color}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}"});`);
     }
 });
 
@@ -64,15 +64,12 @@ app.get('/send_safe', async (req, res) => {
     const { user, text, pass } = req.query;
     const sender = await User.findOne({ username: user, password: pass });
     if (!sender || sender.isBanned) return res.send("showBanScreen();");
-
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
     if (text.startsWith('/')) {
         const p = text.split(' ');
         if (sender.isAdmin && p[0] === '/clear') await Message.deleteMany({});
-        return res.send("console.log('Command Processed');");
+        return res.send("console.log('Command OK');");
     }
-
     await Message.create({ user, text, color: sender.isAdmin ? "#ff3333" : sender.color, status: sender.status, time });
     return res.send("console.log('Sent');");
 });
