@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V15: Admin Power + Dots Online 🛡️"));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V15: Admin Power + DM System Online 🛡️"));
 
 app.use(cors());
 app.use(express.json());
@@ -21,6 +21,7 @@ const UserSchema = new mongoose.Schema({
 });
 
 const BanSchema = new mongoose.Schema({ ip: String });
+
 const MessageSchema = new mongoose.Schema({ 
     user: String, text: String, color: String, time: String, 
     status: String, 
@@ -31,9 +32,27 @@ const MessageSchema = new mongoose.Schema({
     forUser: { type: String, default: null } 
 });
 
+// NEUE SCHEMAS FÜR DM & FREUNDE
+const FriendshipSchema = new mongoose.Schema({
+    requester: String, 
+    recipient: String, 
+    status: { type: String, enum: ['pending', 'accepted', 'blocked'], default: 'pending' }
+});
+
+const DirectMessageSchema = new mongoose.Schema({
+    sender: String,
+    receiver: String,
+    text: String,
+    time: String,
+    color: String,
+    seen: { type: Boolean, default: false }
+});
+
 const User = mongoose.model('User', UserSchema);
 const IPBan = mongoose.model('IPBan', BanSchema);
 const Message = mongoose.model('Message', MessageSchema);
+const Friendship = mongoose.model('Friendship', FriendshipSchema);
+const DirectMessage = mongoose.model('DirectMessage', DirectMessageSchema);
 
 async function sysMsg(text, color = "#44ff44", isAlert = false, forUser = null, isReset = false, room = "Main") {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -52,6 +71,7 @@ app.get('/auth', async (req, res) => {
     const callback = cb || 'authCB';
     const ipBanned = await IPBan.findOne({ ip });
     if (ipBanned) return res.send(`${callback}({success:false, msg:'IP_BANNED'});`);
+    
     if (mode === 'register') {
         try {
             const tag = Math.floor(1000 + Math.random() * 9000).toString();
@@ -74,7 +94,6 @@ app.get('/delete', async (req, res) => {
     const { id, user, pass } = req.query;
     const admin = await User.findOne({ username: user, password: pass, isAdmin: true });
     if (admin) {
-        // Findet die Nachricht und überschreibt den Text, statt sie zu löschen
         await Message.findByIdAndUpdate(id, { text: "DELETED_BY_ADMIN" });
         res.send("console.log('Marked as deleted');");
     } else {
@@ -87,11 +106,12 @@ app.get('/send_safe', async (req, res) => {
     const currentRoom = room || "Main";
     const sender = await User.findOne({ username: user, password: pass });
     if (!sender) return res.send("console.log('Auth error');");
+    
     if (sender.isAdmin && text.startsWith('/')) {
         const args = text.split(' ');
         const cmd = args[0];
         if (cmd === '/help') {
-            const helpText = "Commands: /clear, /ban [ID] [Reason], /ipban [ID], /unban [ID/IP], /reset";
+            const helpText = "Commands: /clear, /ban [ID], /ipban [ID], /unban [ID/IP], /reset";
             await sysMsg(helpText, "#00d4ff", false, user, false, currentRoom);
             return res.send("console.log('Help sent');");
         }
@@ -141,14 +161,107 @@ app.get('/send_safe', async (req, res) => {
     res.send("console.log('Sent');");
 });
 
+// --- DM & FREUNDE ENDPUNKTE ---
+
+app.get('/friend_request', async (req, res) => {
+    const { user, pass, targetName } = req.query;
+    const sender = await User.findOne({ username: user, password: pass });
+    if (!sender) return res.send("alert('Auth failed');");
+
+    const target = await User.findOne({ username: targetName });
+    if (!target) return res.send("alert('User not found! Make sure to include #ID');");
+    if (target.username === sender.username) return res.send("alert('You cannot add yourself');");
+
+    const existing = await Friendship.findOne({
+        $or: [
+            { requester: sender.username, recipient: target.username },
+            { requester: target.username, recipient: sender.username }
+        ]
+    });
+
+    if (existing) return res.send("alert('Request already exists or you are already friends');");
+
+    await new Friendship({ requester: sender.username, recipient: target.username }).save();
+    res.send("alert('Friend request sent to " + target.username + "');");
+});
+
+app.get('/get_social', async (req, res) => {
+    const { user, pass, cb } = req.query;
+    const me = await User.findOne({ username: user, password: pass });
+    if (!me) return res.send("");
+
+    const friends = await Friendship.find({
+        $or: [{ requester: me.username }, { recipient: me.username }],
+        status: 'accepted'
+    });
+    
+    const requests = await Friendship.find({ recipient: me.username, status: 'pending' });
+    
+    res.send(`${cb}(${JSON.stringify({ friends, requests })});`);
+});
+
+app.get('/handle_request', async (req, res) => {
+    const { user, pass, requestId, action } = req.query;
+    const me = await User.findOne({ username: user, password: pass });
+    if (!me) return res.send("");
+
+    if (action === 'accept') {
+        await Friendship.findByIdAndUpdate(requestId, { status: 'accepted' });
+    } else {
+        await Friendship.findByIdAndDelete(requestId);
+    }
+    res.send("loadSocial();");
+});
+
+app.get('/send_dm', async (req, res) => {
+    const { user, pass, target, text } = req.query;
+    const me = await User.findOne({ username: user, password: pass });
+    if (!me) return res.send("");
+
+    const isFriend = await Friendship.findOne({
+        $or: [
+            { requester: me.username, recipient: target, status: 'accepted' },
+            { requester: target, recipient: me.username, status: 'accepted' }
+        ]
+    });
+
+    if (!isFriend) return res.send("alert('You can only DM friends!');");
+
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    await DirectMessage.create({ sender: me.username, receiver: target, text, time, color: me.color });
+    res.send("loadDMs();");
+});
+
+app.get('/get_dms', async (req, res) => {
+    const { user, pass, target, cb } = req.query;
+    const me = await User.findOne({ username: user, password: pass });
+    if (!me) return res.send("");
+
+    const dms = await DirectMessage.find({
+        $or: [
+            { sender: me.username, receiver: target },
+            { sender: target, receiver: me.username }
+        ]
+    }).sort({ _id: -1 }).limit(50);
+    
+    res.send(`${cb}(${JSON.stringify(dms.reverse())});`);
+});
+
 app.get('/check_updates', async (req, res) => {
-    const { callback } = req.query;
+    const { callback, user } = req.query;
     const rooms = ["Main", "Love", "Find friends", "Beef"];
     const counts = {};
     for (let r of rooms) {
         counts[r] = await Message.countDocuments({ room: r });
     }
-    res.send(`${callback}(${JSON.stringify(counts)});`);
+    
+    // Prüfe auch auf neue DMs
+    let dmCount = 0;
+    if (user) {
+        dmCount = await DirectMessage.countDocuments({ receiver: user, seen: false });
+    }
+    
+    res.send(`${callback}(${JSON.stringify({ counts, dmCount })});`);
 });
 
 app.get('/messages_jsonp', async (req, res) => {
