@@ -4,64 +4,88 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V9.5: Color & System Messages Online ❄️"));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V10: IP-Ban & Security Online ❄️"));
 
 app.use(cors());
 app.use(express.json());
 
+// Datenmodelle
 const UserSchema = new mongoose.Schema({
     username: { type: String, unique: true },
     pureName: { type: String, unique: true },
     password: { type: String },
     color: { type: String },
     isAdmin: { type: Boolean, default: false },
-    isBanned: { type: Boolean, default: false },
-    status: { type: String, default: "User" },
-    tag: String
+    lastIp: String,
+    status: { type: String, default: "User" }
 });
 
-const MessageSchema = new mongoose.Schema({
-    user: String, text: String, color: String, time: String, status: String, isSystem: { type: Boolean, default: false }
-});
+const BanSchema = new mongoose.Schema({ ip: String, reason: String });
+const MessageSchema = new mongoose.Schema({ user: String, text: String, color: String, time: String, status: String, isSystem: { type: Boolean, default: false } });
 
 const User = mongoose.model('User', UserSchema);
+const IPBan = mongoose.model('IPBan', BanSchema);
 const Message = mongoose.model('Message', MessageSchema);
 
-// Hilfsfunktion für System-Nachrichten
-async function sendSystemMsg(text) {
+// System Nachricht senden
+async function sysMsg(text) {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     await Message.create({ user: "SYSTEM", text, color: "#44ff44", status: "SYS", time, isSystem: true });
 }
 
 app.get('/auth', async (req, res) => {
     const { mode, user, pass, cb } = req.query;
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     const callback = cb || 'authCB';
-    
+
+    const isBanned = await IPBan.findOne({ ip });
+    if (isBanned) return res.send(`${callback}({success:false, msg:'Your IP is permanently banned.'});`);
+
     if (mode === 'register') {
         try {
             const tag = Math.floor(1000 + Math.random() * 9000).toString();
-            // Zufällige helle Farbe generieren
             const randomColor = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
-            await User.create({ username: `${user.trim()}#${tag}`, pureName: user.trim(), password: pass, tag: tag, color: randomColor });
+            await User.create({ username: `${user}#${tag}`, pureName: user.toLowerCase(), password: pass, color: randomColor, lastIp: ip });
             return res.send(`${callback}({success:true, msg:'Account created!'});`);
-        } catch(e) { return res.send(`${callback}({success:false, msg:'Username taken'});`); }
+        } catch(e) { return res.send(`${callback}({success:false, msg:'Error: Username taken'});`); }
     } else {
-        const found = await User.findOne({ pureName: user?.trim(), password: pass });
-        if (!found) return res.send(`${callback}({success:false, msg:'Invalid Login'});`);
-        if (found.isBanned) return res.send(`${callback}({isBanned: true});`);
+        const found = await User.findOne({ pureName: user?.toLowerCase(), password: pass });
+        if (!found) return res.send(`${callback}({success:false, msg:'Invalid Credentials'});`);
         
-        // System-Nachricht beim Joinen
-        await sendSystemMsg(`${found.username} joined the room`);
-        
+        found.lastIp = ip;
+        await found.save();
+        await sysMsg(`${found.username} joined.`);
         return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}"});`);
     }
 });
 
-// Logout-Endpunkt für "Left the room"
-app.get('/logout_notify', async (req, res) => {
-    const { user } = req.query;
-    if(user) await sendSystemMsg(`${user} left the room`);
-    res.send("console.log('Logged out');");
+app.get('/send_safe', async (req, res) => {
+    const { user, text, pass } = req.query;
+    const sender = await User.findOne({ username: user, password: pass });
+    if (!sender) return res.send("console.log('Auth error');");
+
+    // Befehle: /ipban [username]
+    if (sender.isAdmin && text.startsWith('/ipban ')) {
+        const targetName = text.split(' ')[1];
+        const targetUser = await User.findOne({ username: targetName });
+        if (targetUser) {
+            await IPBan.create({ ip: targetUser.lastIp, reason: "Admin Ban" });
+            await sysMsg(`${targetName} was IP-Banned.`);
+            return res.send("console.log('Banned');");
+        }
+    }
+    
+    // Befehl: /unban [ip]
+    if (sender.isAdmin && text.startsWith('/unban ')) {
+        const targetIp = text.split(' ')[1];
+        await IPBan.deleteOne({ ip: targetIp });
+        await sysMsg(`IP ${targetIp} unbanned.`);
+        return res.send("console.log('Unbanned');");
+    }
+
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    await Message.create({ user, text, color: sender.color, status: sender.status, time });
+    res.send("console.log('Sent');");
 });
 
 app.get('/messages_jsonp', async (req, res) => {
@@ -69,14 +93,4 @@ app.get('/messages_jsonp', async (req, res) => {
     res.send(`${req.query.callback}(${JSON.stringify(msgs.reverse())});`);
 });
 
-app.get('/send_safe', async (req, res) => {
-    const { user, text, pass } = req.query;
-    const sender = await User.findOne({ username: user, password: pass });
-    if (!sender) return res.send("console.log('Auth Error');");
-    
-    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    await Message.create({ user, text, color: sender.color, status: sender.status, time });
-    res.send("console.log('Sent');");
-});
-
-app.listen(process.env.PORT || 10000, '0.0.0.0');
+app.listen(process.env.PORT || 10000);
