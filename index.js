@@ -18,7 +18,7 @@ const UserSchema = new mongoose.Schema({
     isBanned: { type: Boolean, default: false },
     lastIp: String,
     status: { type: String, default: "User" },
-    lastSeen: { type: Number, default: 0 } // NEU: Zeitstempel für Online-Status
+    lastSeen: { type: Number, default: 0 } 
 });
 
 const BanSchema = new mongoose.Schema({ ip: String });
@@ -61,7 +61,7 @@ async function sysMsg(text, color = "#44ff44", isAlert = false, forUser = null, 
 
 app.get('/logout_notify', async (req, res) => {
     const { user, room } = req.query;
-    if (user) await sysMsg(`${user} left the room.`, "#ff4444", false, null, false, room || "Main");
+    if (user) await sysMsg(`${user} left the room.`, "#666666", false, null, false, room || "Main");
     res.send("console.log('Logout logged');");
 });
 
@@ -93,7 +93,10 @@ app.get('/auth', async (req, res) => {
         found.lastIp = ip;
         found.lastSeen = Date.now();
         await found.save();
-        await sysMsg(found.isAdmin ? "⚠️ THE ADMIN IS HERE ⚠️" : `${found.username} joined`, found.isAdmin ? "#ff0000" : "#44ff44", found.isAdmin);
+        
+        // Admin nutzt isAlert für den animierten Banner
+        await sysMsg(found.isAdmin ? `${found.username}` : `${found.username} joined`, found.isAdmin ? "#ff0000" : "#666666", found.isAdmin);
+        
         return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}"});`);
     }
 });
@@ -211,24 +214,22 @@ app.get('/get_dms', async (req, res) => {
     const { user, pass, target, cb } = req.query;
     const me = await User.findOne({ username: user, password: pass });
     if (!me) return res.send("");
+    
+    // NEU: Markiere alle ungelesenen DMs von DIESEM Partner als gelesen
+    await DirectMessage.updateMany({ sender: target, receiver: me.username, seen: false }, { seen: true });
+
     const dms = await DirectMessage.find({ $or: [{ sender: me.username, receiver: target }, { sender: target, receiver: me.username }] }).sort({ _id: -1 }).limit(50);
     res.send(`${cb}(${JSON.stringify(dms.reverse())});`);
 });
 
-// AKTUALISIERT: check_updates mit Online-Status Erkennung
 app.get('/check_updates', async (req, res) => {
     const { callback, user } = req.query;
-    
-    // User als online markieren
-    if (user) {
-        await User.findOneAndUpdate({ username: user }, { lastSeen: Date.now() });
-    }
+    if (user) await User.findOneAndUpdate({ username: user }, { lastSeen: Date.now() });
 
     const rooms = ["Main", "Love", "Find friends", "Beef"];
     const counts = {};
     for (let r of rooms) counts[r] = await Message.countDocuments({ room: r });
     
-    // Online Status prüfen (aktiv vor weniger als 60 Sekunden)
     const minuteAgo = Date.now() - 60000;
     const onlineList = await User.find({ lastSeen: { $gt: minuteAgo } }, 'username');
     const onlineFriends = onlineList.map(f => f.username);
