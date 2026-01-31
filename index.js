@@ -4,16 +4,14 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI)
-    .then(() => console.log("Sub-Zero V28: System Online ❄️"))
-    .catch(err => console.error("Mongo Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V29: System Online ❄️")).catch(err => console.error("Mongo Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // --- SCHEMAS ---
-// strict: false erlaubt das Hinzufügen neuer Felder wie color/bio auch bei alten Usern
+
 const UserSchema = new mongoose.Schema({
     username: { type: String, unique: true },
     pureName: { type: String, unique: true },
@@ -90,32 +88,28 @@ app.get('/get_profile', async (req, res) => {
     } catch (e) { res.send(`${req.query.cb}({success:false});`); }
 });
 
-// *** DER FIX FÜR DAS UPDATE ***
-app.post('/update_profile_post', async (req, res) => {
+// *** NEW UPDATE ENDPOINT (GET REQUEST) - FIX FOR NETWORK ERROR ***
+app.get('/update_profile_safe', async (req, res) => {
     try {
-        const { user, pass, bio, color } = req.body;
-        console.log("Update Request for:", user);
+        const { user, bio, color, cb } = req.query;
+        console.log("Updating (GET):", user, bio, color);
 
-        // 1. User finden
-        const me = await User.findOne({ username: user });
-        
-        // 2. Prüfen ob User existiert und Passwort stimmt
-        if (!me) return res.json({ success: false, msg: "User not found" });
-        if (me.password !== pass) return res.json({ success: false, msg: "Wrong password" });
+        const updateFields = {};
+        if (bio) updateFields.bio = bio.substring(0, 150);
+        if (color) updateFields.color = color;
 
-        // 3. Werte setzen
-        if (bio !== undefined && bio !== null) me.bio = bio.substring(0, 150);
-        if (color !== undefined && color !== null) me.color = color;
+        // Finde User NUR per Name und update sofort
+        const result = await User.updateOne({ username: user }, { $set: updateFields });
 
-        // 4. Speichern erzwingen
-        await me.save();
-        
-        console.log("Updated successfully:", me.color, me.bio);
-        res.json({ success: true, color: me.color });
-
+        if (result.matchedCount > 0) {
+            // Sende JSONP Callback zurück
+            res.send(`${cb}({success:true, color:"${color}", bio:"${bio}"});`);
+        } else {
+            res.send(`${cb}({success:false, msg:"User not found"});`);
+        }
     } catch (e) {
-        console.error("Update Error:", e);
-        res.status(500).json({ success: false, msg: "Server Error" });
+        console.error(e);
+        res.send(`${req.query.cb}({success:false, msg:"Server Error"});`);
     }
 });
 
@@ -163,19 +157,18 @@ app.get('/auth', async (req, res) => {
         } else {
             const found = await User.findOne({ pureName: user?.trim().toLowerCase(), password: pass });
             if (!found) return res.send(`${callback}({success:false, msg:'Login failed'});`);
-            
             if (found.isBanned && !found.isAdmin) {
                 if (found.banExpires > 0 && Date.now() > found.banExpires) { found.isBanned = false; found.banExpires = 0; await found.save(); } 
                 else { return res.send(`${callback}({success:false, msg: 'BANNED', isBanned: true});`); }
             }
             found.lastIp = ip; found.lastSeen = Date.now();
             if (!found.isOnlineNotify) { 
-                const joinColor = found.isAdmin ? "#ff0000" : "#44ff44"; // GRÜN für normale, ROT für Admin
+                const joinColor = found.isAdmin ? "#ff0000" : "#44ff44"; 
                 await sysMsg(found.isAdmin ? `${found.username}` : `${found.username} joined`, joinColor, found.isAdmin); 
                 found.isOnlineNotify = true; 
             }
             await found.save();
-            return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color || '#fff'}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}", pfp: "${found.pfp || ""}"});`);
+            return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color || '#ffffff'}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}", pfp: "${found.pfp || ""}"});`);
         }
     } catch(e) { res.send(`${cb || 'authCB'}({success:false, msg:'Server Error'});`); }
 });
