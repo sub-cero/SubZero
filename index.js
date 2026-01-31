@@ -4,22 +4,11 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI)
-    .then(() => console.log("Sub-Zero V17: System Online ❄️"))
-    .catch(err => console.error("Mongo Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V18: System Online")).catch(err => console.error(err));
 
-// CORS: Erlaubt alles (Wichtig für Mobile/Web Cross-Origin)
-app.use(cors({
-    origin: '*',
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
-
-// LIMIT: 50MB für Bilder (Muss vor den Routen stehen!)
+app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-
-// --- SCHEMAS ---
 
 const UserSchema = new mongoose.Schema({
     username: { type: String, unique: true },
@@ -32,7 +21,7 @@ const UserSchema = new mongoose.Schema({
     isShadowBanned: { type: Boolean, default: false },
     lastIp: String,
     status: { type: String, default: "User" },
-    customStatus: { type: String, default: "Newcomer ❄️" },
+    customStatus: { type: String, default: "Newcomer" },
     bio: { type: String, default: "No bio set." },
     pfp: { type: String, default: "" }, 
     level: { type: Number, default: 1 },
@@ -77,8 +66,6 @@ const Friendship = mongoose.model('Friendship', FriendshipSchema);
 const DirectMessage = mongoose.model('DirectMessage', DirectMessageSchema);
 const Config = mongoose.model('Config', ConfigSchema);
 
-// --- SYSTEM FUNCTIONS ---
-
 async function sysMsg(text, color = "#44ff44", isAlert = false, forUser = null, isReset = false, room = "Main", resetReason = "") {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     try {
@@ -101,8 +88,6 @@ setInterval(async () => {
     } catch (e) {}
 }, 30000);
 
-// --- ENDPOINTS ---
-
 app.get('/get_profile', async (req, res) => {
     try {
         const { target, cb } = req.query;
@@ -123,12 +108,18 @@ app.get('/get_profile', async (req, res) => {
 app.post('/update_profile_post', async (req, res) => {
     try {
         const { user, pass, bio, customStatus, pfp } = req.body;
-        const me = await User.findOne({ username: user, password: pass });
-        if (me) {
-            if (bio !== undefined && bio !== null) me.bio = bio.substring(0, 150);
-            if (customStatus !== undefined && customStatus !== null) me.customStatus = customStatus.substring(0, 30);
-            if (pfp !== undefined && pfp !== null) me.pfp = pfp;
-            await me.save();
+        const updateData = {};
+        if (bio !== undefined && bio !== null) updateData.bio = bio.substring(0, 150);
+        if (customStatus !== undefined && customStatus !== null) updateData.customStatus = customStatus.substring(0, 30);
+        if (pfp !== undefined && pfp !== null) updateData.pfp = pfp;
+
+        const result = await User.findOneAndUpdate(
+            { username: user, password: pass },
+            { $set: updateData },
+            { new: true }
+        );
+
+        if (result) {
             res.json({ success: true });
         } else {
             res.json({ success: false, msg: "Auth failed" });
@@ -188,7 +179,6 @@ app.get('/auth', async (req, res) => {
             const found = await User.findOne({ pureName: user?.trim().toLowerCase(), password: pass });
             if (!found) return res.send(`${callback}({success:false, msg:'Login failed'});`);
             
-            // Unban logic
             if (found.isBanned && !found.isAdmin) {
                 if (found.banExpires > 0 && Date.now() > found.banExpires) {
                     found.isBanned = false; found.banExpires = 0; await found.save();
@@ -369,7 +359,6 @@ app.get('/messages_jsonp', async (req, res) => {
     res.send(`${callback}(${JSON.stringify(enrichedMsgs)});`);
 });
 
-// GLOBAL ERROR HANDLER (Verhindert Absturz bei zu großen Dateien)
 app.use((err, req, res, next) => {
     if (err.type === 'entity.too.large') {
         res.status(413).json({ success: false, msg: 'File too large' });
