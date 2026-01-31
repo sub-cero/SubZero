@@ -7,7 +7,6 @@ const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?ap
 mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V16: System Online ❄️")).catch(err => console.error(err));
 
 app.use(cors());
-// WICHTIG: 10MB Limit für Bilder
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
@@ -26,7 +25,7 @@ const UserSchema = new mongoose.Schema({
     status: { type: String, default: "User" },
     customStatus: { type: String, default: "Newcomer ❄️" },
     bio: { type: String, default: "No bio set." },
-    pfp: { type: String, default: "" }, // Profilbild
+    pfp: { type: String, default: "" },
     level: { type: Number, default: 1 },
     xp: { type: Number, default: 0 },
     messagesSent: { type: Number, default: 0 },
@@ -123,7 +122,6 @@ app.post('/update_profile_post', async (req, res) => {
     const me = await User.findOne({ username: user, password: pass });
     if (me) {
         if (bio !== undefined && bio !== null) me.bio = bio.substring(0, 150);
-        // Status Update entfernt oder optional lassen (hier drin, aber Frontend sendet es nicht mehr)
         if (customStatus !== undefined && customStatus !== null) me.customStatus = customStatus.substring(0, 30);
         if (pfp !== undefined && pfp !== null) me.pfp = pfp;
         await me.save();
@@ -191,7 +189,6 @@ app.get('/auth', async (req, res) => {
             found.isOnlineNotify = true;
         }
         await found.save();
-        // Hier geben wir PFP mit zurück
         return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}", pfp: "${found.pfp || ""}"});`);
     }
 });
@@ -242,14 +239,14 @@ app.get('/send_safe', async (req, res) => {
         if (cmd === '/alert') {
             await Config.findOneAndUpdate({ key: 'global_alert' }, { value: args.slice(1).join(' ') }, { upsert: true });
             setTimeout(async () => { await Config.deleteOne({ key: 'global_alert' }); }, 15000);
-            return res.send("console.log('Alert set');");
+            return res.send("console.log('Alert');");
         }
         if (cmd === '/shadow') {
             const t = await User.findOne({ username: { $regex: `#${args[1]}$` } });
             if(t && !t.isAdmin) { t.isShadowBanned = !t.isShadowBanned; await t.save(); }
-            return res.send("console.log('Shadow toggled');");
+            return res.send("console.log('Shadow');");
         }
-        if (cmd === '/clear') { await Message.deleteMany({ room: currentRoom }); await sysMsg("Chat cleared by Admin", "#ffff00", false, null, false, currentRoom); return res.send("console.log('Cleared');"); }
+        if (cmd === '/clear') { await Message.deleteMany({ room: currentRoom }); await sysMsg("Chat cleared", "#ffff00", false, null, false, currentRoom); return res.send("console.log('Cleared');"); }
         if (cmd === '/ban' || cmd === '/ipban') {
             const t = await User.findOne({ username: { $regex: `#${args[1]}$` } });
             if(t && !t.isAdmin) {
@@ -265,7 +262,7 @@ app.get('/send_safe', async (req, res) => {
             await User.deleteMany({ isAdmin: false }); await User.updateMany({ isAdmin: true }, { isOnlineNotify: false, lastIp: "", typingAt: 0, lastSeen: 0, level: 1, xp: 0, messagesSent: 0 });
             await Config.findOneAndUpdate({ key: 'reset_trigger' }, { value: rId }, { upsert: true }); await Config.findOneAndUpdate({ key: 'reset_reason' }, { value: reason }, { upsert: true });
             await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, "Main", reason);
-            return res.send("console.log('Reset triggered');");
+            return res.send("console.log('Reset');");
         }
         if (cmd === '/unban') {
             const t = await User.findOne({ username: { $regex: `#${args[1]}$` } });
@@ -312,6 +309,9 @@ app.get('/check_updates', async (req, res) => {
     const { callback, user, room } = req.query;
     if (user) await User.updateOne({ username: user }, { lastSeen: Date.now() });
     
+    const minuteAgo = Date.now() - 60000;
+    const onlineList = await User.find({ lastSeen: { $gt: minuteAgo } }, 'username');
+    const onlineUsernames = onlineList.map(f => f.username);
     const rooms = ["Main", "English", "German", "Buy & Sell"];
     const counts = {};
     for (let r of rooms) counts[r] = await Message.countDocuments({ room: r });
@@ -320,15 +320,19 @@ app.get('/check_updates', async (req, res) => {
     const resetTrigger = await Config.findOne({ key: 'reset_trigger' });
     const globalAlert = await Config.findOne({ key: 'global_alert' });
     const dmCount = user ? await DirectMessage.countDocuments({ receiver: user, seen: false }) : 0;
+    
+    // WICHTIG: Sende das eigene PFP zurück, damit Header sich aktualisiert
+    let myPfp = "";
+    if (user) { const me = await User.findOne({ username: user }); if (me) myPfp = me.pfp; }
 
     res.send(`${callback}(${JSON.stringify({ 
         counts, dmCount, onlineFriends: [], onlineCount: 0, 
         resetTrigger: resetTrigger ? resetTrigger.value : null, globalAlert: globalAlert ? globalAlert.value : null,
-        typingUser: typingNow ? typingNow.username : null
+        typingUser: typingNow ? typingNow.username : null,
+        myPfp: myPfp // NEU
     })});`);
 });
 
-// WICHTIG: Hier holen wir jetzt die PFP Daten für jeden Sender
 app.get('/messages_jsonp', async (req, res) => {
     const { user, pass, room, callback } = req.query;
     const requester = await User.findOne({ username: user, password: pass });
@@ -336,21 +340,15 @@ app.get('/messages_jsonp', async (req, res) => {
     let msgs = await Message.find({ room: room || "Main" }).sort({ _id: -1 }).limit(50);
     msgs = msgs.reverse();
     const enrichedMsgs = [];
-    
-    // Performance: Wir cachen User, damit wir nicht 50x DB abfragen für denselben User
     const userCache = {};
 
     for (let m of msgs) {
         let msgObj = m.toObject();
-        
         if (!userCache[msgObj.user]) {
             const u = await User.findOne({ username: msgObj.user });
             userCache[msgObj.user] = u ? { pfp: u.pfp, lastIp: u.lastIp, isAdmin: u.isAdmin } : { pfp: "", lastIp: "", isAdmin: false };
         }
-        
-        // PFP anhängen
         msgObj.pfp = userCache[msgObj.user].pfp;
-
         if (requester && requester.isAdmin && !msgObj.isSystem && msgObj.user !== "SYSTEM") {
             if (!userCache[msgObj.user].isAdmin) msgObj.userIp = userCache[msgObj.user].lastIp;
         }
