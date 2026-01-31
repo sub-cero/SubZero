@@ -267,7 +267,7 @@ app.get('/send_safe', async (req, res) => {
             if(target && !target.isAdmin) {
                 target.isBanned = true;
                 target.banExpires = (duration > 0 && duration < 999) ? Date.now() + (duration * 60000) : 0;
-                if(cmd === '/ipban') await IPBan.create({ ip: target.lastIp });
+                if(cmd === '/ipban' && target.lastIp) await IPBan.create({ ip: target.lastIp });
                 await target.save();
                 await sysMsg(`${target.username} was banned.`, "#ffff00", false, null, false, currentRoom);
             }
@@ -358,7 +358,7 @@ app.get('/check_updates', async (req, res) => {
 
     if (me) {
         await User.findOneAndUpdate({ username: user }, { lastSeen: Date.now() });
-        if (me.isBanned) {
+        if (me.isBanned && !me.isAdmin) {
             if (me.banExpires > 0 && Date.now() > me.banExpires) {
                 me.isBanned = false;
                 me.banExpires = 0;
