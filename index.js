@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V16: System Online ❄️"));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V16: System Online ❄️")).catch(err => console.error(err));
 
 app.use(cors());
 app.use(express.json());
@@ -91,13 +91,15 @@ function getBanString(expires) {
 }
 
 setInterval(async () => {
-    const minuteAgo = Date.now() - 60000;
-    const lostUsers = await User.find({ lastSeen: { $lt: minuteAgo }, isOnlineNotify: true });
-    for (let u of lostUsers) {
-        await sysMsg(`${u.username} left the room.`, "#ff4444", false, null, false, "Main");
-        u.isOnlineNotify = false;
-        await u.save();
-    }
+    try {
+        const minuteAgo = Date.now() - 60000;
+        const lostUsers = await User.find({ lastSeen: { $lt: minuteAgo }, isOnlineNotify: true });
+        for (let u of lostUsers) {
+            await sysMsg(`${u.username} left the room.`, "#ff4444", false, null, false, "Main");
+            u.isOnlineNotify = false;
+            await u.save();
+        }
+    } catch (e) {}
 }, 30000);
 
 app.get('/logout_notify', async (req, res) => {
@@ -389,7 +391,7 @@ app.get('/check_updates', async (req, res) => {
 });
 
 app.get('/messages_jsonp', async (req, res) => {
-    const { user, pass, room } = req.query;
+    const { user, pass, room, callback } = req.query;
     const requester = await User.findOne({ username: user, password: pass });
     
     if (requester && requester.isBanned && !requester.isAdmin) {
@@ -398,7 +400,7 @@ app.get('/messages_jsonp', async (req, res) => {
             requester.banExpires = 0;
             await requester.save();
         } else {
-            return res.send(`${req.query.callback}([{isSystem: true, text: 'BANNED', color: '#ff0000'}]);`);
+            return res.send(`${callback}([{isSystem: true, text: 'BANNED', color: '#ff0000'}]);`);
         }
     }
     
@@ -413,7 +415,7 @@ app.get('/messages_jsonp', async (req, res) => {
         }
         enrichedMsgs.push(msgObj);
     }
-    res.send(`${req.query.callback}(${JSON.stringify(enrichedMsgs)});`);
+    res.send(`${callback}(${JSON.stringify(enrichedMsgs)});`);
 });
 
 app.listen(process.env.PORT || 10000);
