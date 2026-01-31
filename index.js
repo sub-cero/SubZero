@@ -205,7 +205,7 @@ app.get('/auth', async (req, res) => {
     }
 });
 
-// --- FIXED DELETE LOGIC FOR MARKETPLACE ---
+// --- ROBUST DELETE FUNCTION (SOLD FIX) ---
 app.get('/delete', async (req, res) => {
     const { id, user, pass } = req.query;
     const requester = await User.findOne({ username: user, password: pass });
@@ -215,16 +215,22 @@ app.get('/delete', async (req, res) => {
     const msg = await Message.findById(id);
     if (!msg) return res.send("console.log('Message not found');");
 
-    // Berechtigung: Admin ODER Besitzer
     if (requester.isAdmin || msg.user === requester.username) {
         
-        // Prüfen ob es ein Marktplatz-Post ist
-        if (msg.text.includes('$$MARKET$$|')) {
-            // Wir ersetzen NUR das Tag, behalten aber den Inhalt (Product/Price/Desc)
-            const newText = msg.text.replace('$$MARKET$$|', '$$SOLD$$|');
+        // Prüfen, ob es ein Marktplatz-Post ist
+        if (msg.text.includes('$$MARKET$$')) {
+            // String.replace ersetzt nur das erste Vorkommen, das reicht hier
+            const newText = msg.text.replace('$$MARKET$$', '$$SOLD$$');
             await Message.findByIdAndUpdate(id, { text: newText });
             res.send("console.log('Item marked as SOLD');");
-        } else {
+        } 
+        // Wenn es bereits SOLD ist, vielleicht ganz löschen oder so lassen
+        else if (msg.text.includes('$$SOLD$$')) {
+            // Optional: Ganz löschen wenn schon sold
+             await Message.findByIdAndUpdate(id, { text: "DELETED_BY_OWNER" });
+             res.send("console.log('Deleted completely');");
+        }
+        else {
             // Normale Nachrichten löschen
             await Message.findByIdAndUpdate(id, { text: "DELETED_BY_ADMIN" }); 
             res.send("console.log('Message deleted');");
@@ -421,7 +427,7 @@ app.get('/check_updates', async (req, res) => {
         if (me.isBanned && !me.isAdmin) isBanned = true;
     }
 
-    // UPDATE: Neue Raumnamen für Badges
+    // UPDATE: Raum-Namen an Frontend angepasst ("English", "German", "Buy & Sell")
     const rooms = ["Main", "English", "German", "Buy & Sell"];
     const counts = {};
     for (let r of rooms) counts[r] = await Message.countDocuments({ room: r });
