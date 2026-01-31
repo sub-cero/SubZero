@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V30: System Online")).catch(err => console.error(err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V32: System Online ❄️")).catch(err => console.error(err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
@@ -81,12 +81,13 @@ setInterval(async () => {
         const minuteAgo = Date.now() - 60000;
         const lostUsers = await User.find({ lastSeen: { $lt: minuteAgo }, isOnlineNotify: true });
         for (let u of lostUsers) {
+            // ECHTZEIT LEAVE: ROT
             await sysMsg(`${u.username} left the room.`, "#ff4444", false, null, false, "Main");
             u.isOnlineNotify = false;
             await u.save();
         }
     } catch (e) {}
-}, 30000);
+}, 15000);
 
 app.get('/get_profile', async (req, res) => {
     try {
@@ -111,7 +112,6 @@ app.get('/get_profile', async (req, res) => {
 app.post('/update_profile_post', async (req, res) => {
     try {
         const { user, pass, bio, customStatus, color } = req.body;
-        
         const updateDoc = {};
         if(bio !== undefined) updateDoc.bio = bio.substring(0, 150);
         if(color !== undefined) updateDoc.color = color;
@@ -123,7 +123,7 @@ app.post('/update_profile_post', async (req, res) => {
         );
 
         if (result.matchedCount > 0) {
-            res.json({ success: true });
+            res.json({ success: true, color });
         } else {
             res.json({ success: false, msg: "Auth failed" });
         }
@@ -137,6 +137,7 @@ app.get('/logout_notify', async (req, res) => {
         const { user, room } = req.query;
         const found = await User.findOne({ username: user });
         if (found) {
+            // ECHTZEIT LEAVE: ROT
             await sysMsg(`${found.username} left the room.`, "#ff4444", false, null, false, room || "Main");
             found.isOnlineNotify = false;
             await found.save();
@@ -184,11 +185,15 @@ app.get('/auth', async (req, res) => {
             if (found.isBanned && !found.isAdmin) {
                 if (found.banExpires > 0 && Date.now() > found.banExpires) {
                     found.isBanned = false; found.banExpires = 0; await found.save();
-                } else { return res.send(`${callback}({success:false, msg: 'BANNED', isBanned: true});`); }
+                } else { 
+                    const timeLeft = Math.ceil((found.banExpires - Date.now()) / 60000);
+                    return res.send(`${callback}({success:false, msg: 'BANNED', isBanned: true, banTimeLeft: timeLeft + " min"});`); 
+                }
             }
 
             found.lastIp = ip; found.lastSeen = Date.now();
             if (!found.isOnlineNotify) {
+                // ECHTZEIT JOIN: GRÜN (Außer Admin)
                 const joinColor = found.isAdmin ? "#ff0000" : "#44ff44";
                 await sysMsg(found.isAdmin ? `${found.username}` : `${found.username} joined`, joinColor, found.isAdmin);
                 found.isOnlineNotify = true;
@@ -285,35 +290,6 @@ app.get('/send_safe', async (req, res) => {
     } catch(e) { res.send("console.log('Err');"); }
 });
 
-app.get('/friend_request', async (req, res) => { res.send(""); });
-app.get('/get_social', async (req, res) => { 
-    const { user, pass, cb } = req.query; 
-    const me = await User.findOne({ username: user, password: pass });
-    if (!me) return res.send("");
-    const friends = await Friendship.find({ $or: [{ requester: me.username }, { recipient: me.username }], status: 'accepted' });
-    const requests = await Friendship.find({ recipient: me.username, status: 'pending' });
-    res.send(`${cb}(${JSON.stringify({ friends, requests, blocked: [] })});`);
-});
-app.get('/handle_request', async (req, res) => {
-    const { user, pass, requestId, action } = req.query;
-    const me = await User.findOne({ username: user, password: pass });
-    if (me && action === 'accept') await Friendship.findByIdAndUpdate(requestId, { status: 'accepted' });
-    else if (me) await Friendship.findByIdAndDelete(requestId);
-    res.send("loadSocial();");
-});
-app.get('/send_dm', async (req, res) => { 
-    const { user, pass, target, text } = req.query;
-    const me = await User.findOne({ username: user, password: pass });
-    if (me) await DirectMessage.create({ sender: me.username, receiver: target, text, time: "Now", color: me.color });
-    res.send("loadMsgs();");
-});
-app.get('/get_dms', async (req, res) => { 
-    const { user, pass, target, cb } = req.query;
-    const me = await User.findOne({ username: user, password: pass });
-    const dms = await DirectMessage.find({ $or: [{ sender: me.username, receiver: target }, { sender: target, receiver: me.username }] }).limit(50);
-    res.send(`${cb}(${JSON.stringify(dms.reverse())});`);
-});
-
 app.get('/check_updates', async (req, res) => {
     const { callback, user, room } = req.query;
     if (user) await User.updateOne({ username: user }, { lastSeen: Date.now() });
@@ -323,14 +299,11 @@ app.get('/check_updates', async (req, res) => {
     for (let r of rooms) counts[r] = await Message.countDocuments({ room: r });
     
     const typingNow = await User.findOne({ typingAt: { $gt: Date.now() - 3000 }, typingRoom: room, username: { $ne: user } });
-    const resetTrigger = await Config.findOne({ key: 'reset_trigger' });
-    const globalAlert = await Config.findOne({ key: 'global_alert' });
-    const dmCount = user ? await DirectMessage.countDocuments({ receiver: user, seen: false }) : 0;
     const onlineCount = await User.countDocuments({ lastSeen: { $gt: Date.now() - 60000 } });
     
     let myColor = "#ffffff";
     let isBanned = false;
-    let banTimeLeft = 0;
+    let banTimeLeft = "";
 
     if (user) { 
         const me = await User.findOne({ username: user }); 
@@ -344,9 +317,7 @@ app.get('/check_updates', async (req, res) => {
     }
 
     res.send(`${callback}(${JSON.stringify({ 
-        counts, dmCount, onlineFriends: [], onlineCount, 
-        resetTrigger: resetTrigger ? resetTrigger.value : null, globalAlert: globalAlert ? globalAlert.value : null,
-        typingUser: typingNow ? typingNow.username : null,
+        counts, onlineCount, typingUser: typingNow ? typingNow.username : null,
         myColor: myColor,
         isBanned: isBanned,
         banTimeLeft: banTimeLeft
