@@ -175,7 +175,7 @@ app.get('/get_profile', async (req, res) => {
     } catch (e) { res.send(`${req.query.cb}({success:false});`); }
 });
 
-// 3. PROFIL UPDATES (Safe via GET & POST für Bilder)
+// 3. PROFIL UPDATES
 app.get('/update_profile_safe', async (req, res) => {
     try {
         const { user, bio, color, cb } = req.query;
@@ -204,10 +204,9 @@ app.get('/send_safe', async (req, res) => {
         const currentRoom = room || "Main";
         const sender = await User.findOne({ username: user, password: pass });
         
-        if (!sender) return res.send("0"); // Auth fail
-        if (sender.isBanned && !sender.isAdmin) return res.send("0"); // Ban fail
+        if (!sender) return res.send("0"); 
+        if (sender.isBanned && !sender.isAdmin) return res.send("0"); 
 
-        // XP System
         sender.messagesSent++;
         sender.xp += 10;
         if (sender.xp >= sender.level * 100) {
@@ -215,7 +214,7 @@ app.get('/send_safe', async (req, res) => {
             await sysMsg(`${sender.username} reached Level ${sender.level}! ✨`, "#ffff00", currentRoom);
         }
         await sender.save();
-        await User.findOneAndUpdate({ username: user }, { typingAt: 0 }); // Typing stop
+        await User.findOneAndUpdate({ username: user }, { typingAt: 0 });
 
         // --- ADMIN COMMANDS ---
         if (sender.isAdmin && text.startsWith('/')) {
@@ -258,6 +257,7 @@ app.get('/send_safe', async (req, res) => {
                 await Message.deleteMany({}); 
                 await User.deleteMany({ isAdmin: false }); 
                 await User.updateMany({ isAdmin: true }, { isOnlineNotify: false, lastIp: "", typingAt: 0, lastSeen: 0, level: 1, xp: 0, messagesSent: 0 });
+                // Reset Trigger aktualisieren (ID ändert sich -> Frontend erkennt Wipe)
                 await Config.findOneAndUpdate({ key: 'reset_trigger' }, { value: Date.now().toString() }, { upsert: true }); 
                 await Config.findOneAndUpdate({ key: 'reset_reason' }, { value: reason }, { upsert: true });
                 await sysMsg("SYSTEM RESET INITIATED", "#ff0000", "Main", true, reason);
@@ -265,7 +265,6 @@ app.get('/send_safe', async (req, res) => {
             }
         }
 
-        // Normale Nachricht (inkl. $$MARKET$$)
         await Message.create({ 
             user, text, 
             color: sender.color, 
@@ -301,18 +300,13 @@ app.get('/check_updates', async (req, res) => {
     const { callback, user, room } = req.query;
     if (user) await User.updateOne({ username: user }, { lastSeen: Date.now() });
     
-    // Typing
-    const typingNow = await User.findOne({ typingAt: { $gt: Date.now() - 3000 }, typingRoom: room, username: { $ne: user } });
-    
-    // Online Counter
-    const onlineCount = await User.countDocuments({ lastSeen: { $gt: Date.now() - 60000 } });
-    
-    // Room Dots (Nachrichten zählen)
     const rooms = ["Main", "English", "German", "Buy & Sell"];
     const counts = {};
     for (let r of rooms) counts[r] = await Message.countDocuments({ room: r });
-
-    // User Status
+    
+    const typingNow = await User.findOne({ typingAt: { $gt: Date.now() - 3000 }, typingRoom: room, username: { $ne: user } });
+    const onlineCount = await User.countDocuments({ lastSeen: { $gt: Date.now() - 60000 } });
+    
     let me = null;
     let globalAlert = null;
     let resetTrigger = null;
