@@ -45,32 +45,19 @@ const MessageSchema = new mongoose.Schema({
     isReset: { type: Boolean, default: false },
     resetReason: { type: String, default: "" },
     forUser: { type: String, default: null },
-    // Reply Struktur
-    replyTo: { 
-        user: String, 
-        text: String 
-    }
+    replyTo: { user: String, text: String }
 });
 
 const FriendshipSchema = new mongoose.Schema({
-    requester: String, 
-    recipient: String, 
+    requester: String, recipient: String, 
     status: { type: String, enum: ['pending', 'accepted', 'blocked'], default: 'pending' }
 });
 
 const DirectMessageSchema = new mongoose.Schema({
-    sender: String,
-    receiver: String,
-    text: String,
-    time: String,
-    color: String,
-    seen: { type: Boolean, default: false }
+    sender: String, receiver: String, text: String, time: String, color: String, seen: { type: Boolean, default: false }
 });
 
-const ConfigSchema = new mongoose.Schema({
-    key: String,
-    value: String
-});
+const ConfigSchema = new mongoose.Schema({ key: String, value: String });
 
 const User = mongoose.model('User', UserSchema);
 const IPBan = mongoose.model('IPBan', BanSchema);
@@ -99,7 +86,6 @@ function getBanString(expires) {
     return `${days}d ${hours}h ${minutes}m`;
 }
 
-// Auto-Logout Checker
 setInterval(async () => {
     try {
         const minuteAgo = Date.now() - 60000;
@@ -119,17 +105,10 @@ app.get('/get_profile', async (req, res) => {
     const found = await User.findOne({ username: target });
     if (!found) return res.send(`${cb}({success:false});`);
     const profileData = {
-        username: found.username,
-        color: found.color,
-        isAdmin: found.isAdmin,
-        status: found.status,
-        customStatus: found.customStatus,
-        bio: found.bio,
-        level: found.level,
-        xp: found.xp,
-        xpNeeded: found.level * 100,
-        messages: found.messagesSent,
-        joinedAt: new Date(found.joinedAt).toLocaleDateString(),
+        username: found.username, color: found.color, isAdmin: found.isAdmin,
+        status: found.status, customStatus: found.customStatus, bio: found.bio,
+        level: found.level, xp: found.xp, xpNeeded: found.level * 100,
+        messages: found.messagesSent, joinedAt: new Date(found.joinedAt).toLocaleDateString(),
         isOnline: found.lastSeen > Date.now() - 60000
     };
     res.send(`${cb}(${JSON.stringify(profileData)});`);
@@ -226,7 +205,7 @@ app.get('/auth', async (req, res) => {
     }
 });
 
-// --- UPDATED DELETE FUNCTION (USER RIGHTS + SOLD LOGIC) ---
+// --- FIXED DELETE LOGIC FOR MARKETPLACE ---
 app.get('/delete', async (req, res) => {
     const { id, user, pass } = req.query;
     const requester = await User.findOne({ username: user, password: pass });
@@ -236,17 +215,17 @@ app.get('/delete', async (req, res) => {
     const msg = await Message.findById(id);
     if (!msg) return res.send("console.log('Message not found');");
 
-    // Prüfen: Ist User Admin ODER gehört die Nachricht ihm?
+    // Berechtigung: Admin ODER Besitzer
     if (requester.isAdmin || msg.user === requester.username) {
         
-        // Wenn es ein Marktplatz-Post ist ($$MARKET$$), markieren wir ihn als VERKAUFT ($$SOLD$$)
-        // anstatt ihn zu löschen.
-        if (msg.text.startsWith('$$MARKET$$|')) {
+        // Prüfen ob es ein Marktplatz-Post ist
+        if (msg.text.includes('$$MARKET$$|')) {
+            // Wir ersetzen NUR das Tag, behalten aber den Inhalt (Product/Price/Desc)
             const newText = msg.text.replace('$$MARKET$$|', '$$SOLD$$|');
             await Message.findByIdAndUpdate(id, { text: newText });
-            res.send("console.log('Item marked as sold');");
+            res.send("console.log('Item marked as SOLD');");
         } else {
-            // Normale Nachrichten werden "gelöscht" (Text ersetzt)
+            // Normale Nachrichten löschen
             await Message.findByIdAndUpdate(id, { text: "DELETED_BY_ADMIN" }); 
             res.send("console.log('Message deleted');");
         }
@@ -442,8 +421,7 @@ app.get('/check_updates', async (req, res) => {
         if (me.isBanned && !me.isAdmin) isBanned = true;
     }
 
-    // UPDATE: Raum-Namen an Frontend angepasst ("English", "German", "Buy & Sell")
-    // Damit die Badges (rote Zahlen) korrekt funktionieren
+    // UPDATE: Neue Raumnamen für Badges
     const rooms = ["Main", "English", "German", "Buy & Sell"];
     const counts = {};
     for (let r of rooms) counts[r] = await Message.countDocuments({ room: r });
