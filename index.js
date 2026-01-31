@@ -4,29 +4,24 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI)
-    .then(() => console.log("Sub-Zero V21: System Online ❄️"))
-    .catch(err => console.error("Mongo Connection Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V22: System Online")).catch(err => console.error(err));
 
-// CORS & LIMITS
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-
-// --- SCHEMAS ---
 
 const UserSchema = new mongoose.Schema({
     username: { type: String, unique: true },
     pureName: { type: String, unique: true },
     password: { type: String },
-    color: { type: String, default: "#ffffff" }, // HIER WIRD DIE FARBE GESPEICHERT
+    color: { type: String, default: "#ffffff" },
     isAdmin: { type: Boolean, default: false },
     isBanned: { type: Boolean, default: false },
     banExpires: { type: Number, default: 0 },
     isShadowBanned: { type: Boolean, default: false },
     lastIp: String,
     status: { type: String, default: "User" },
-    customStatus: { type: String, default: "Newcomer ❄️" },
+    customStatus: { type: String, default: "Newcomer" },
     bio: { type: String, default: "No bio set." },
     pfp: { type: String, default: "" }, 
     level: { type: Number, default: 1 },
@@ -71,8 +66,6 @@ const Friendship = mongoose.model('Friendship', FriendshipSchema);
 const DirectMessage = mongoose.model('DirectMessage', DirectMessageSchema);
 const Config = mongoose.model('Config', ConfigSchema);
 
-// --- SYSTEM FUNCTIONS ---
-
 async function sysMsg(text, color = "#44ff44", isAlert = false, forUser = null, isReset = false, room = "Main", resetReason = "") {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     try {
@@ -95,8 +88,6 @@ setInterval(async () => {
     } catch (e) {}
 }, 30000);
 
-// --- ENDPOINTS ---
-
 app.get('/get_profile', async (req, res) => {
     try {
         const { target, cb } = req.query;
@@ -104,7 +95,7 @@ app.get('/get_profile', async (req, res) => {
         if (!found) return res.send(`${cb}({success:false});`);
         const profileData = {
             username: found.username, 
-            color: found.color || "#ffffff", // Farbe senden
+            color: found.color || "#ffffff",
             isAdmin: found.isAdmin,
             status: found.status, 
             customStatus: found.customStatus, 
@@ -121,9 +112,8 @@ app.get('/get_profile', async (req, res) => {
 app.post('/update_profile_post', async (req, res) => {
     try {
         const { user, pass, bio, customStatus, color } = req.body;
-        console.log("Saving Update:", user, bio, color); // Debug Log
-
         const me = await User.findOne({ username: user, password: pass });
+        
         if (me) {
             if (bio !== undefined && bio !== null) me.bio = bio.substring(0, 150);
             if (customStatus !== undefined && customStatus !== null) me.customStatus = customStatus.substring(0, 30);
@@ -136,7 +126,7 @@ app.post('/update_profile_post', async (req, res) => {
         }
     } catch (e) {
         console.error(e);
-        res.status(500).json({ success: false, msg: e.message });
+        res.status(500).json({ success: false, msg: "Server Error" });
     }
 });
 
@@ -201,8 +191,7 @@ app.get('/auth', async (req, res) => {
                 found.isOnlineNotify = true;
             }
             await found.save();
-            // PFP und COLOR mitsenden
-            return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color || '#fff'}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}", pfp: "${found.pfp || ""}"});`);
+            return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color || '#ffffff'}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}", pfp: "${found.pfp || ""}"});`);
         }
     } catch(e) { res.send(`${cb || 'authCB'}({success:false, msg:'Server Error'});`); }
 });
@@ -342,7 +331,7 @@ app.get('/check_updates', async (req, res) => {
         counts, dmCount, onlineFriends: [], onlineCount: 0, 
         resetTrigger: resetTrigger ? resetTrigger.value : null, globalAlert: globalAlert ? globalAlert.value : null,
         typingUser: typingNow ? typingNow.username : null,
-        myColor: myColor // NEU: Sendet aktuelle Farbe
+        myColor: myColor
     })});`);
 });
 
@@ -359,11 +348,10 @@ app.get('/messages_jsonp', async (req, res) => {
         let msgObj = m.toObject();
         if (!userCache[msgObj.user]) {
             const u = await User.findOne({ username: msgObj.user });
-            // Cache die Farbe und Admin-Status
             userCache[msgObj.user] = u ? { pfp: u.pfp, color: u.color, lastIp: u.lastIp, isAdmin: u.isAdmin } : { pfp: "", color: "#fff", lastIp: "", isAdmin: false };
         }
         msgObj.pfp = userCache[msgObj.user].pfp;
-        msgObj.color = userCache[msgObj.user].color || msgObj.color; // Farbe aktualisieren
+        msgObj.color = userCache[msgObj.user].color || msgObj.color;
         
         if (requester && requester.isAdmin && !msgObj.isSystem && msgObj.user !== "SYSTEM") {
             if (!userCache[msgObj.user].isAdmin) msgObj.userIp = userCache[msgObj.user].lastIp;
