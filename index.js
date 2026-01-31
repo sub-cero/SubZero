@@ -173,12 +173,10 @@ app.get('/auth', async (req, res) => {
         
         found.lastIp = ip;
         found.lastSeen = Date.now();
-        
         if (!found.isOnlineNotify) {
             await sysMsg(found.isAdmin ? `${found.username}` : `${found.username} joined`, found.isAdmin ? "#ff0000" : "#44ff44", found.isAdmin);
             found.isOnlineNotify = true;
         }
-        
         await found.save();
         return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}"});`);
     }
@@ -244,15 +242,9 @@ app.get('/send_safe', async (req, res) => {
         const cmd = args[0].toLowerCase();
 
         if (cmd === '/help') {
-            const helpText = "Admin: /clear, /ban [ID] [Min], /ipban [ID], /unban [ID], /reset [Reason], /alert [Text], /shadow [ID]";
+            const helpText = "Admin: /clear, /ban [ID], /ipban [ID], /unban [ID], /reset [Reason], /alert [Text], /shadow [ID]";
             await sysMsg(helpText, "#00d4ff", false, user, false, currentRoom);
             return res.send("console.log('Help sent');");
-        }
-        if (cmd === '/alert') {
-            const alertMsg = args.slice(1).join(' ');
-            await Config.findOneAndUpdate({ key: 'global_alert' }, { value: alertMsg }, { upsert: true });
-            setTimeout(async () => { await Config.deleteOne({ key: 'global_alert' }); }, 15000);
-            return res.send("console.log('Alert via command set');");
         }
         if (cmd === '/shadow') {
             const targetInput = args[1];
@@ -260,9 +252,8 @@ app.get('/send_safe', async (req, res) => {
             if(target && !target.isAdmin) {
                 target.isShadowBanned = !target.isShadowBanned;
                 await target.save();
-                await sysMsg(`Shadow status for ${target.username} toggled.`, "#ff00ff", false, user, false, currentRoom);
             }
-            return res.send("console.log('Shadow ban toggled');");
+            return res.send("console.log('Shadow toggled');");
         }
         if (cmd === '/clear') {
             await Message.deleteMany({ room: currentRoom });
@@ -273,26 +264,12 @@ app.get('/send_safe', async (req, res) => {
             const targetInput = args[1];
             const target = await User.findOne({ username: { $regex: `#${targetInput}$` } });
             let duration = parseInt(args[2]);
-            if(target) {
-                if(target.isAdmin) {
-                    await sysMsg("Error: You cannot ban an Admin!", "#ff4444", false, user, false, currentRoom);
-                    return res.send("console.log('Protect Admin');");
-                }
+            if(target && !target.isAdmin) {
                 target.isBanned = true;
-                if (duration > 998 || isNaN(duration)) {
-                    target.banExpires = 0;
-                    duration = "Permanent";
-                } else {
-                    target.banExpires = Date.now() + (duration * 60000);
-                    duration = duration + " min";
-                }
-
-                if(cmd === '/ipban') {
-                    const exists = await IPBan.findOne({ ip: target.lastIp });
-                    if(!exists) await IPBan.create({ ip: target.lastIp });
-                }
+                target.banExpires = (duration > 0 && duration < 999) ? Date.now() + (duration * 60000) : 0;
+                if(cmd === '/ipban') await IPBan.create({ ip: target.lastIp });
                 await target.save();
-                await sysMsg(`${target.username} was banned (${duration}).`, "#ffff00", false, null, false, currentRoom);
+                await sysMsg(`${target.username} was banned.`, "#ffff00", false, null, false, currentRoom);
             }
             return res.send("console.log('Banned');");
         }
@@ -301,33 +278,20 @@ app.get('/send_safe', async (req, res) => {
             const target = await User.findOne({ username: { $regex: `#${targetInput}$` } });
             if(target) {
                 target.isBanned = false;
-                target.isShadowBanned = false;
                 target.banExpires = 0;
+                target.isShadowBanned = false;
                 await target.save();
                 await IPBan.deleteMany({ ip: target.lastIp });
                 await sysMsg(`${target.username} was unbanned.`, "#44ff44", false, null, false, currentRoom);
             }
             return res.send("console.log('Unbanned');");
         }
-        if (cmd === '/reset') {
-            const reason = args.slice(1).join(' ') || "No reason specified";
-            await User.deleteMany({ isAdmin: false });
-            await Message.deleteMany({});
-            await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, "Main", reason);
-            return res.send("console.log('Reset');");
-        }
     }
+
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const forUserValue = sender.isShadowBanned ? user : null;
-    
     await Message.create({ 
-        user, 
-        text, 
-        color: sender.color, 
-        status: sender.status, 
-        time, 
-        room: currentRoom,
-        forUser: forUserValue 
+        user, text, color: sender.color, status: sender.status, 
+        time, room: currentRoom, forUser: sender.isShadowBanned ? user : null 
     });
     res.send("console.log('Sent');");
 });
@@ -335,16 +299,13 @@ app.get('/send_safe', async (req, res) => {
 app.get('/friend_request', async (req, res) => {
     const { user, pass, targetName } = req.query;
     const sender = await User.findOne({ username: user, password: pass });
-    if (!sender) return res.send("alert('Auth failed');");
+    if (!sender) return res.send("");
     const target = await User.findOne({ username: targetName });
-    if (!target) return res.send("alert('User not found!');");
-    if (sender.username === target.username) return res.send("alert('Cannot add yourself');");
-    
-    const existing = await Friendship.findOne({ $or: [{ requester: sender.username, recipient: target.username }, { requester: target.username, recipient: sender.username }] });
-    if (existing) return res.send("alert('Already exists');");
-    
-    await new Friendship({ requester: sender.username, recipient: target.username }).save();
-    res.send("alert('Request sent');");
+    if (target && sender.username !== target.username) {
+        const existing = await Friendship.findOne({ $or: [{ requester: sender.username, recipient: target.username }, { requester: target.username, recipient: sender.username }] });
+        if (!existing) await new Friendship({ requester: sender.username, recipient: target.username }).save();
+    }
+    res.send("console.log('Friend req processed');");
 });
 
 app.get('/get_social', async (req, res) => {
@@ -352,24 +313,19 @@ app.get('/get_social', async (req, res) => {
     const me = await User.findOne({ username: user, password: pass });
     if (!me) return res.send("");
     const friends = await Friendship.find({ $or: [{ requester: me.username }, { recipient: me.username }], status: 'accepted' });
-    const friendsList = friends.map(f => ({
-        _id: f._id,
-        requester: f.requester,
-        recipient: f.recipient
-    }));
     const requests = await Friendship.find({ recipient: me.username, status: 'pending' });
     const blocked = await Friendship.find({ $or: [{ requester: me.username }, { recipient: me.username }], status: 'blocked' });
-    res.send(`${cb}(${JSON.stringify({ friends: friendsList, requests, blocked })});`);
+    res.send(`${cb}(${JSON.stringify({ friends, requests, blocked })});`);
 });
 
 app.get('/handle_request', async (req, res) => {
     const { user, pass, requestId, action } = req.query;
     const me = await User.findOne({ username: user, password: pass });
-    if (!me) return res.send("");
-
-    if (action === 'accept') await Friendship.findByIdAndUpdate(requestId, { status: 'accepted' });
-    else if (action === 'block') await Friendship.findByIdAndUpdate(requestId, { status: 'blocked' });
-    else await Friendship.findByIdAndDelete(requestId);
+    if (me) {
+        if (action === 'accept') await Friendship.findByIdAndUpdate(requestId, { status: 'accepted' });
+        else if (action === 'block') await Friendship.findByIdAndUpdate(requestId, { status: 'blocked' });
+        else await Friendship.findByIdAndDelete(requestId);
+    }
     res.send("loadSocial();");
 });
 
@@ -377,7 +333,6 @@ app.get('/send_dm', async (req, res) => {
     const { user, pass, target, text } = req.query;
     const me = await User.findOne({ username: user, password: pass });
     if (me && !me.isBanned) {
-        await User.findOneAndUpdate({ username: user }, { typingAt: 0 });
         const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         await DirectMessage.create({ sender: me.username, receiver: target, text, time, color: me.color });
     }
@@ -388,7 +343,6 @@ app.get('/get_dms', async (req, res) => {
     const { user, pass, target, cb } = req.query;
     const me = await User.findOne({ username: user, password: pass });
     if (!me) return res.send("");
-    
     await DirectMessage.updateMany({ sender: target, receiver: me.username, seen: false }, { seen: true });
     const dms = await DirectMessage.find({ $or: [{ sender: me.username, receiver: target }, { sender: target, receiver: me.username }] }).sort({ _id: -1 }).limit(50);
     res.send(`${cb}(${JSON.stringify(dms.reverse())});`);
@@ -400,13 +354,19 @@ app.get('/check_updates', async (req, res) => {
     
     const ipBanned = await IPBan.findOne({ ip });
     let me = user ? await User.findOne({ username: user }) : null;
-    
+    let isBanned = !!ipBanned;
+
     if (me) {
         await User.findOneAndUpdate({ username: user }, { lastSeen: Date.now() });
-        if (me.isBanned && me.banExpires > 0 && Date.now() > me.banExpires) {
-            me.isBanned = false;
-            me.banExpires = 0;
-            await me.save();
+        if (me.isBanned) {
+            if (me.banExpires > 0 && Date.now() > me.banExpires) {
+                me.isBanned = false;
+                me.banExpires = 0;
+                await me.save();
+                isBanned = false;
+            } else {
+                isBanned = true;
+            }
         }
     }
 
@@ -417,24 +377,14 @@ app.get('/check_updates', async (req, res) => {
     const minuteAgo = Date.now() - 60000;
     const onlineList = await User.find({ lastSeen: { $gt: minuteAgo } }, 'username');
     const onlineFriends = onlineList.map(f => f.username);
-
-    const typingNow = await User.findOne({ 
-        typingAt: { $gt: Date.now() - 3000 }, 
-        typingRoom: room,
-        username: { $ne: user }
-    });
-
+    const typingNow = await User.findOne({ typingAt: { $gt: Date.now() - 3000 }, typingRoom: room, username: { $ne: user } });
     const resetMsg = await Message.findOne({ isReset: true }).sort({ _id: -1 });
     const globalAlert = await Config.findOne({ key: 'global_alert' });
-
-    let dmCount = 0;
-    if (user) dmCount = await DirectMessage.countDocuments({ receiver: user, seen: false });
+    const dmCount = user ? await DirectMessage.countDocuments({ receiver: user, seen: false }) : 0;
     
     res.send(`${callback}(${JSON.stringify({ 
-        counts, 
-        dmCount, 
-        onlineFriends, 
-        isBanned: !!ipBanned || (me ? me.isBanned : false),
+        counts, dmCount, onlineFriends, 
+        isBanned: isBanned,
         banTimeLeft: me ? getBanString(me.banExpires) : (ipBanned ? "PERMANENT (IP)" : null),
         resetTrigger: resetMsg ? resetMsg._id : null,
         resetReason: resetMsg ? resetMsg.resetReason : null,
@@ -447,12 +397,14 @@ app.get('/messages_jsonp', async (req, res) => {
     const { user, pass, room } = req.query;
     const check = await User.findOne({ username: user, password: pass });
     if (check && check.isBanned && !check.isAdmin) {
-        if (check.banExpires > 0 && Date.now() < check.banExpires) {
-             const timeLeft = getBanString(check.banExpires);
-             return res.send(`${req.query.callback}([{isSystem: true, text: 'ACCOUNT_BANNED ('+timeLeft+')', color: '#ff0000'}]);`);
+        if (check.banExpires > 0 && Date.now() > check.banExpires) {
+            check.isBanned = false;
+            check.banExpires = 0;
+            await check.save();
+        } else {
+            return res.send(`${req.query.callback}([{isSystem: true, text: 'BANNED', color: '#ff0000'}]);`);
         }
     }
-    
     const msgs = await Message.find({ room: room || "Main", $or: [{ forUser: null }, { forUser: user }] }).sort({ _id: -1 }).limit(50);
     res.send(`${req.query.callback}(${JSON.stringify(msgs.reverse())});`);
 });
