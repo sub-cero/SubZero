@@ -120,7 +120,6 @@ app.get('/auth', async (req, res) => {
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     const callback = cb || 'authCB';
     
-    // IP Ban Check für alle Auth-Aktionen (Check, Login, Register)
     const ipBanned = await IPBan.findOne({ ip });
     if (ipBanned) return res.send(`${callback}({success:false, msg:'IP_BANNED', isBanned: true});`);
 
@@ -228,7 +227,15 @@ app.get('/send_safe', async (req, res) => {
     const sender = await User.findOne({ username: user, password: pass });
     
     if (!sender) return res.send("console.log('Auth error');");
-    if (sender.isBanned && !sender.isAdmin) return res.send("console.log('Banned');");
+    if (sender.isBanned && !sender.isAdmin) {
+        if (sender.banExpires > 0 && Date.now() > sender.banExpires) {
+            sender.isBanned = false;
+            sender.banExpires = 0;
+            await sender.save();
+        } else {
+            return res.send("console.log('Banned');");
+        }
+    }
 
     await User.findOneAndUpdate({ username: user }, { typingAt: 0 });
     
@@ -281,7 +288,6 @@ app.get('/send_safe', async (req, res) => {
                 }
 
                 if(cmd === '/ipban') {
-                    // Falls IP bereits existiert, nicht doppelt anlegen
                     const exists = await IPBan.findOne({ ip: target.lastIp });
                     if(!exists) await IPBan.create({ ip: target.lastIp });
                 }
@@ -392,11 +398,17 @@ app.get('/check_updates', async (req, res) => {
     const { callback, user, room } = req.query;
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     
-    // IP Ban Check
     const ipBanned = await IPBan.findOne({ ip });
+    let me = user ? await User.findOne({ username: user }) : null;
     
-    const me = user ? await User.findOne({ username: user }) : null;
-    if (me) await User.findOneAndUpdate({ username: user }, { lastSeen: Date.now() });
+    if (me) {
+        await User.findOneAndUpdate({ username: user }, { lastSeen: Date.now() });
+        if (me.isBanned && me.banExpires > 0 && Date.now() > me.banExpires) {
+            me.isBanned = false;
+            me.banExpires = 0;
+            await me.save();
+        }
+    }
 
     const rooms = ["Main", "Love", "Find friends", "Beef"];
     const counts = {};
@@ -422,7 +434,7 @@ app.get('/check_updates', async (req, res) => {
         counts, 
         dmCount, 
         onlineFriends, 
-        isBanned: !!ipBanned || (me && me.isBanned && (me.banExpires === 0 || Date.now() < me.banExpires)),
+        isBanned: !!ipBanned || (me && me.isBanned),
         banTimeLeft: me ? getBanString(me.banExpires) : (ipBanned ? "PERMANENT (IP)" : null),
         resetTrigger: resetMsg ? resetMsg._id : null,
         resetReason: resetMsg ? resetMsg.resetReason : null,
@@ -435,7 +447,11 @@ app.get('/messages_jsonp', async (req, res) => {
     const { user, pass, room } = req.query;
     const check = await User.findOne({ username: user, password: pass });
     if (check && check.isBanned && !check.isAdmin) {
-        if (check.banExpires === 0 || Date.now() < check.banExpires) {
+        if (check.banExpires > 0 && Date.now() > check.banExpires) {
+            check.isBanned = false;
+            check.banExpires = 0;
+            await check.save();
+        } else {
              const timeLeft = getBanString(check.banExpires);
              return res.send(`${req.query.callback}([{isSystem: true, text: 'ACCOUNT_BANNED ('+timeLeft+')', color: '#ff0000'}]);`);
         }
