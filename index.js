@@ -410,22 +410,21 @@ app.get('/messages_jsonp', async (req, res) => {
     let msgs = await Message.find({ room: room || "Main", $or: [{ forUser: null }, { forUser: user }] }).sort({ _id: -1 }).limit(50);
     msgs = msgs.reverse();
 
-    if (requester && requester.isAdmin) {
-        const enrichedMsgs = [];
-        for (let m of msgs) {
-            let msgObj = m.toObject();
-            if (!msgObj.isSystem && msgObj.user !== "SYSTEM") {
-                const author = await User.findOne({ username: msgObj.user });
-                if (author && !author.isAdmin && author.lastIp) {
-                    msgObj.text += ` [IP: ${author.lastIp}]`;
-                }
+    const enrichedMsgs = [];
+    for (let m of msgs) {
+        let msgObj = m.toObject();
+        // Wenn der Abfragende Admin ist, suchen wir die IP des Verfassers
+        if (requester && requester.isAdmin && !msgObj.isSystem && msgObj.user !== "SYSTEM") {
+            const author = await User.findOne({ username: msgObj.user });
+            // Nur IP zeigen, wenn Verfasser KEIN Admin ist
+            if (author && !author.isAdmin) {
+                msgObj.userIp = author.lastIp; // IP in separates Feld für das gelbe Kästchen
             }
-            enrichedMsgs.push(msgObj);
         }
-        return res.send(`${req.query.callback}(${JSON.stringify(enrichedMsgs)});`);
+        enrichedMsgs.push(msgObj);
     }
 
-    res.send(`${req.query.callback}(${JSON.stringify(msgs)});`);
+    res.send(`${req.query.callback}(${JSON.stringify(enrichedMsgs)});`);
 });
 
 app.listen(process.env.PORT || 10000);
