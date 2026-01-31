@@ -160,6 +160,9 @@ app.get('/auth', async (req, res) => {
     const ipBanned = await IPBan.findOne({ ip });
     if (ipBanned) return res.send(`${callback}({success:false, msg:'IP_BANNED', isBanned: true});`);
 
+    const minuteAgo = Date.now() - 60000;
+    const onlineCount = await User.countDocuments({ lastSeen: { $gt: minuteAgo } });
+
     if (mode === 'check') {
         const pureName = user?.trim().toLowerCase();
         const existing = await User.findOne({ pureName });
@@ -168,6 +171,10 @@ app.get('/auth', async (req, res) => {
     }
 
     if (mode === 'register') {
+        if (onlineCount >= 150) {
+            return res.send(`${callback}({success:false, msg:'Server full (150/150). Try later!'});`);
+        }
+
         const validate = (str) => /^[a-zA-Z0-9]{5,}$/.test(str);
         if (!validate(user) || !validate(pass)) {
             return res.send(`${callback}({success:false, msg:'Min. 5 chars, no special characters!'});`);
@@ -187,6 +194,12 @@ app.get('/auth', async (req, res) => {
     } else {
         const found = await User.findOne({ pureName: user?.trim().toLowerCase(), password: pass });
         if (!found) return res.send(`${callback}({success:false, msg:'Login failed'});`);
+
+        const alreadyOnline = found.lastSeen > minuteAgo;
+        if (!alreadyOnline && onlineCount >= 150 && !found.isAdmin) {
+            return res.send(`${callback}({success:false, msg:'Server full (150/150)'});`);
+        }
+
         if (found.isBanned && !found.isAdmin) {
             if (found.banExpires > 0 && Date.now() > found.banExpires) {
                 found.isBanned = false;
@@ -401,7 +414,7 @@ app.get('/check_updates', async (req, res) => {
     
     const minuteAgo = Date.now() - 60000;
     const onlineList = await User.find({ lastSeen: { $gt: minuteAgo } }, 'username');
-    const onlineFriends = onlineList.map(f => f.username);
+    const onlineUsernames = onlineList.map(f => f.username);
     const typingNow = await User.findOne({ typingAt: { $gt: Date.now() - 3000 }, typingRoom: room, username: { $ne: user } });
     
     const resetTrigger = await Config.findOne({ key: 'reset_trigger' });
@@ -410,7 +423,10 @@ app.get('/check_updates', async (req, res) => {
     const dmCount = user ? await DirectMessage.countDocuments({ receiver: user, seen: false }) : 0;
     
     res.send(`${callback}(${JSON.stringify({ 
-        counts, dmCount, onlineFriends, 
+        counts, 
+        dmCount, 
+        onlineFriends: onlineUsernames,
+        onlineCount: onlineUsernames.length, 
         isBanned: isBanned,
         banTimeLeft: me ? getBanString(me.banExpires) : (ipBanned ? "PERMANENT (IP)" : null),
         resetTrigger: resetTrigger ? resetTrigger.value : null,
