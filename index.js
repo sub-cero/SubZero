@@ -3,12 +3,26 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const app = express();
 
+// DATABASE CONNECTION
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V18: System Online")).catch(err => console.error(err));
+mongoose.connect(mongoURI)
+    .then(() => console.log("Sub-Zero V19: System Online ❄️"))
+    .catch(err => console.error("Mongo Connection Error:", err));
 
-app.use(cors({ origin: '*' }));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+// MIDDLEWARE - REIHENFOLGE IST WICHTIG!
+// 1. CORS ganz oben erlauben
+app.use(cors({
+    origin: '*', 
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+    credentials: true
+}));
+
+// 2. Limits setzen (100MB zur Sicherheit)
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
+
+// --- SCHEMAS ---
 
 const UserSchema = new mongoose.Schema({
     username: { type: String, unique: true },
@@ -21,7 +35,7 @@ const UserSchema = new mongoose.Schema({
     isShadowBanned: { type: Boolean, default: false },
     lastIp: String,
     status: { type: String, default: "User" },
-    customStatus: { type: String, default: "Newcomer" },
+    customStatus: { type: String, default: "Newcomer ❄️" },
     bio: { type: String, default: "No bio set." },
     pfp: { type: String, default: "" }, 
     level: { type: Number, default: 1 },
@@ -66,6 +80,8 @@ const Friendship = mongoose.model('Friendship', FriendshipSchema);
 const DirectMessage = mongoose.model('DirectMessage', DirectMessageSchema);
 const Config = mongoose.model('Config', ConfigSchema);
 
+// --- SYSTEM FUNCTIONS ---
+
 async function sysMsg(text, color = "#44ff44", isAlert = false, forUser = null, isReset = false, room = "Main", resetReason = "") {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     try {
@@ -88,6 +104,8 @@ setInterval(async () => {
     } catch (e) {}
 }, 30000);
 
+// --- ENDPOINTS ---
+
 app.get('/get_profile', async (req, res) => {
     try {
         const { target, cb } = req.query;
@@ -102,30 +120,32 @@ app.get('/get_profile', async (req, res) => {
             isOnline: found.lastSeen > Date.now() - 60000
         };
         res.send(`${cb}(${JSON.stringify(profileData)});`);
-    } catch (e) { res.send(`${req.query.cb}({success:false});`); }
+    } catch (e) { 
+        res.send(`${req.query.cb}({success:false});`); 
+    }
 });
 
 app.post('/update_profile_post', async (req, res) => {
+    // Debugging Log
+    console.log("Update Request received for:", req.body.user);
     try {
         const { user, pass, bio, customStatus, pfp } = req.body;
-        const updateData = {};
-        if (bio !== undefined && bio !== null) updateData.bio = bio.substring(0, 150);
-        if (customStatus !== undefined && customStatus !== null) updateData.customStatus = customStatus.substring(0, 30);
-        if (pfp !== undefined && pfp !== null) updateData.pfp = pfp;
-
-        const result = await User.findOneAndUpdate(
-            { username: user, password: pass },
-            { $set: updateData },
-            { new: true }
-        );
-
-        if (result) {
+        const me = await User.findOne({ username: user, password: pass });
+        
+        if (me) {
+            if (bio !== undefined && bio !== null) me.bio = bio.substring(0, 150);
+            if (customStatus !== undefined && customStatus !== null) me.customStatus = customStatus.substring(0, 30);
+            if (pfp !== undefined && pfp !== null) me.pfp = pfp;
+            
+            await me.save();
+            console.log("Update success for", user);
             res.json({ success: true });
         } else {
+            console.log("Auth failed for update");
             res.json({ success: false, msg: "Auth failed" });
         }
     } catch (e) {
-        console.error("Update Error:", e);
+        console.error("Server Update Error:", e);
         res.status(500).json({ success: false, msg: e.message });
     }
 });
@@ -359,9 +379,11 @@ app.get('/messages_jsonp', async (req, res) => {
     res.send(`${callback}(${JSON.stringify(enrichedMsgs)});`);
 });
 
+// GLOBAL ERROR HANDLER - Fängt "File too large" ab
 app.use((err, req, res, next) => {
+    console.error("Server Error:", err);
     if (err.type === 'entity.too.large') {
-        res.status(413).json({ success: false, msg: 'File too large' });
+        res.status(413).json({ success: false, msg: 'Payload too large' });
     } else {
         res.status(500).json({ success: false, msg: 'Server Error' });
     }
