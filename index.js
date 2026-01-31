@@ -6,8 +6,10 @@ const app = express();
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
 mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V16: System Online ❄️")).catch(err => console.error(err));
 
-app.use(cors());
-// Limit für große Bilder
+// ERLAUBT ALLE VERBINDUNGEN (Fix für Error Saving)
+app.use(cors({ origin: '*' }));
+
+// LIMIT FÜR GROSSE BILDER
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -26,7 +28,7 @@ const UserSchema = new mongoose.Schema({
     status: { type: String, default: "User" },
     customStatus: { type: String, default: "Newcomer ❄️" },
     bio: { type: String, default: "No bio set." },
-    pfp: { type: String, default: "" }, // Profilbild String (Base64)
+    pfp: { type: String, default: "" }, 
     level: { type: Number, default: 1 },
     xp: { type: Number, default: 0 },
     messagesSent: { type: Number, default: 0 },
@@ -109,17 +111,21 @@ app.get('/get_profile', async (req, res) => {
 });
 
 app.post('/update_profile_post', async (req, res) => {
-    const { user, pass, bio, customStatus, pfp } = req.body;
-    const me = await User.findOne({ username: user, password: pass });
-    if (me) {
-        if (bio !== undefined && bio !== null) me.bio = bio.substring(0, 150);
-        if (customStatus !== undefined && customStatus !== null) me.customStatus = customStatus.substring(0, 30);
-        // Profilbild speichern
-        if (pfp !== undefined && pfp !== null) me.pfp = pfp;
-        await me.save();
-        res.json({ success: true });
-    } else {
-        res.json({ success: false, msg: "Auth failed" });
+    try {
+        const { user, pass, bio, customStatus, pfp } = req.body;
+        const me = await User.findOne({ username: user, password: pass });
+        if (me) {
+            if (bio !== undefined && bio !== null) me.bio = bio.substring(0, 150);
+            if (customStatus !== undefined && customStatus !== null) me.customStatus = customStatus.substring(0, 30);
+            if (pfp !== undefined && pfp !== null) me.pfp = pfp;
+            await me.save();
+            res.json({ success: true });
+        } else {
+            res.json({ success: false, msg: "Auth failed" });
+        }
+    } catch (e) {
+        console.error(e);
+        res.json({ success: false, msg: "Server Error" });
     }
 });
 
@@ -181,7 +187,6 @@ app.get('/auth', async (req, res) => {
             found.isOnlineNotify = true;
         }
         await found.save();
-        // Hier pfp mitsenden!
         return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}", pfp: "${found.pfp || ""}"});`);
     }
 });
@@ -311,7 +316,6 @@ app.get('/check_updates', async (req, res) => {
     const globalAlert = await Config.findOne({ key: 'global_alert' });
     const dmCount = user ? await DirectMessage.countDocuments({ receiver: user, seen: false }) : 0;
     
-    // WICHTIG: Sende das eigene PFP zurück, damit Header sich aktualisiert
     let myPfp = "";
     if (user) { const me = await User.findOne({ username: user }); if (me) myPfp = me.pfp; }
 
@@ -319,7 +323,7 @@ app.get('/check_updates', async (req, res) => {
         counts, dmCount, onlineFriends: [], onlineCount: 0, 
         resetTrigger: resetTrigger ? resetTrigger.value : null, globalAlert: globalAlert ? globalAlert.value : null,
         typingUser: typingNow ? typingNow.username : null,
-        myPfp: myPfp // NEU
+        myPfp: myPfp
     })});`);
 });
 
@@ -334,7 +338,6 @@ app.get('/messages_jsonp', async (req, res) => {
 
     for (let m of msgs) {
         let msgObj = m.toObject();
-        // Caching für User-Daten (PFP und Admin-Status)
         if (!userCache[msgObj.user]) {
             const u = await User.findOne({ username: msgObj.user });
             userCache[msgObj.user] = u ? { pfp: u.pfp, lastIp: u.lastIp, isAdmin: u.isAdmin } : { pfp: "", lastIp: "", isAdmin: false };
