@@ -81,7 +81,7 @@ setInterval(async () => {
         const minuteAgo = Date.now() - 60000;
         const lostUsers = await User.find({ lastSeen: { $lt: minuteAgo }, isOnlineNotify: true });
         for (let u of lostUsers) {
-            // ECHTZEIT LEAVE: ROT
+            // ECHTZEIT LEAVE: ROT (#ff4444)
             await sysMsg(`${u.username} left the room.`, "#ff4444", false, null, false, "Main");
             u.isOnlineNotify = false;
             await u.save();
@@ -107,7 +107,7 @@ app.get('/get_profile', async (req, res) => {
     } catch (e) { res.send(`${req.query.cb}({success:false});`); }
 });
 
-// *** ERGÄNZUNG: SAFE UPDATE VIA GET (Fix für Bio/Farbe) ***
+// *** ERGÄNZUNG: SAFE UPDATE VIA GET (Fix für Bio/Farbe ohne Network Error) ***
 app.get('/update_profile_safe', async (req, res) => {
     try {
         const { user, bio, color, cb } = req.query;
@@ -155,7 +155,7 @@ app.get('/logout_notify', async (req, res) => {
         const { user, room } = req.query;
         const found = await User.findOne({ username: user });
         if (found) {
-            // ECHTZEIT LEAVE: ROT
+            // ECHTZEIT LEAVE: ROT (#ff4444)
             await sysMsg(`${found.username} left the room.`, "#ff4444", false, null, false, room || "Main");
             found.isOnlineNotify = false;
             await found.save();
@@ -211,9 +211,12 @@ app.get('/auth', async (req, res) => {
 
             found.lastIp = ip; found.lastSeen = Date.now();
             if (!found.isOnlineNotify) {
-                // ECHTZEIT JOIN: GRÜN (Außer Admin)
-                const joinColor = found.isAdmin ? "#ff0000" : "#44ff44";
-                await sysMsg(found.isAdmin ? `${found.username}` : `${found.username} joined`, joinColor, found.isAdmin);
+                // ECHTZEIT JOIN: GRÜN (#44ff44) oder ADMIN NACHRICHT
+                if (found.isAdmin) {
+                    await sysMsg("⚠️ THE ADMIN IS HERE! ⚠️", "#ff0000", false, null, false, "Main");
+                } else {
+                    await sysMsg(`${found.username} joined`, "#44ff44", false, null, false, "Main");
+                }
                 found.isOnlineNotify = true;
             }
             await found.save();
