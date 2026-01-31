@@ -194,7 +194,8 @@ app.get('/admin_action', async (req, res) => {
         const reason = text || "System Update";
         const resetId = Date.now().toString();
         await Message.deleteMany({});
-        await User.updateMany({ isAdmin: false }, { isOnlineNotify: false });
+        await DirectMessage.deleteMany({});
+        await User.updateMany({ isAdmin: false }, { isOnlineNotify: false, lastIp: "", typingAt: 0, lastSeen: 0 });
         await Config.findOneAndUpdate({ key: 'reset_trigger' }, { value: resetId }, { upsert: true });
         await Config.findOneAndUpdate({ key: 'reset_reason' }, { value: reason }, { upsert: true });
         await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, "Main", reason);
@@ -231,7 +232,7 @@ app.get('/send_safe', async (req, res) => {
         const cmd = args[0].toLowerCase();
 
         if (cmd === '/help') {
-            const helpText = "Admin: /clear, /ban [ID] [Min], /ipban [ID] [Min], /unban [ID], /reset [Reason], /alert [Text], /shadow [ID]";
+            const helpText = "Admin: /clear, /ban [ID], /ipban [ID], /unban [ID], /reset [Reason], /alert [Text], /shadow [ID]";
             await sysMsg(helpText, "#00d4ff", false, user, false, currentRoom);
             return res.send("console.log('Help sent');");
         }
@@ -272,7 +273,8 @@ app.get('/send_safe', async (req, res) => {
             const reason = args.slice(1).join(' ') || "System Update";
             const resetId = Date.now().toString();
             await Message.deleteMany({});
-            await User.updateMany({ isAdmin: false }, { isOnlineNotify: false });
+            await DirectMessage.deleteMany({});
+            await User.updateMany({ isAdmin: false }, { isOnlineNotify: false, lastIp: "", typingAt: 0, lastSeen: 0 });
             await Config.findOneAndUpdate({ key: 'reset_trigger' }, { value: resetId }, { upsert: true });
             await Config.findOneAndUpdate({ key: 'reset_reason' }, { value: reason }, { upsert: true });
             await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, "Main", reason);
