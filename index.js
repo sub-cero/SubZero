@@ -45,6 +45,7 @@ const MessageSchema = new mongoose.Schema({
     isReset: { type: Boolean, default: false },
     resetReason: { type: String, default: "" },
     forUser: { type: String, default: null },
+    // Reply Struktur
     replyTo: { 
         user: String, 
         text: String 
@@ -238,13 +239,14 @@ app.get('/delete', async (req, res) => {
     // Prüfen: Ist User Admin ODER gehört die Nachricht ihm?
     if (requester.isAdmin || msg.user === requester.username) {
         
-        // Wenn es ein Marktplatz-Post ist, markieren wir ihn als VERKAUFT ($$SOLD$$)
+        // Wenn es ein Marktplatz-Post ist ($$MARKET$$), markieren wir ihn als VERKAUFT ($$SOLD$$)
+        // anstatt ihn zu löschen.
         if (msg.text.startsWith('$$MARKET$$|')) {
             const newText = msg.text.replace('$$MARKET$$|', '$$SOLD$$|');
             await Message.findByIdAndUpdate(id, { text: newText });
             res.send("console.log('Item marked as sold');");
         } else {
-            // Normale Nachrichten werden gelöscht
+            // Normale Nachrichten werden "gelöscht" (Text ersetzt)
             await Message.findByIdAndUpdate(id, { text: "DELETED_BY_ADMIN" }); 
             res.send("console.log('Message deleted');");
         }
@@ -441,6 +443,7 @@ app.get('/check_updates', async (req, res) => {
     }
 
     // UPDATE: Raum-Namen an Frontend angepasst ("English", "German", "Buy & Sell")
+    // Damit die Badges (rote Zahlen) korrekt funktionieren
     const rooms = ["Main", "English", "German", "Buy & Sell"];
     const counts = {};
     for (let r of rooms) counts[r] = await Message.countDocuments({ room: r });
