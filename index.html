@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#0a0a0c">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Sub-Zero MK2 | Marketplace</title>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <style>
+        /* --- GLOBAL STYLES --- */
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; } 
+
+        body, html { 
+            margin: 0; padding: 0; 
+            height: 100dvh; 
+            width: 100%;
+            background: #0a0a0c; 
+            color: white; 
+            font-family: 'Inter', sans-serif; 
+            overflow: hidden; 
+            display: flex;
+            flex-direction: column; 
+        }
+
+        /* --- INDICATORS --- */
+        .online-indicator { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 15px; font-family: 'Inter', sans-serif; font-weight: bold; color: var(--sys-green); }
+        .dot { width: 10px; height: 10px; background-color: var(--sys-green); border-radius: 50%; box-shadow: 0 0 10px var(--sys-green); animation: pulse-green 2s infinite; }
+        @keyframes pulse-green { 0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(68, 255, 68, 0.7); } 70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(68, 255, 68, 0); } 100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(68, 255, 68, 0); } }
+
+        /* --- HEADER & NAVIGATION --- */
+        header {
+            flex: 0 0 auto; 
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 15px; background: #0a0a0c; border-bottom: 1px solid #222;
+            z-index: 100;
+        }
+
+        #room-bar {
+            flex: 0 0 auto;
+            display: flex; gap: 10px; padding: 10px; overflow-x: auto;
+            background: #0a0a0c; border-bottom: 1px solid #222;
+            white-space: nowrap;
+        }
+
+        /* --- CHAT AREA --- */
+        #chat {
+            flex: 1 1 auto; 
+            overflow-y: auto; 
+            overflow-x: hidden;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            position: relative;
+            padding-bottom: 120px;
+        }
+
+        /* --- INPUT AREA --- */
+        #bottom-area {
+            flex: 0 0 auto;
+            width: 100%;
+            background: #0a0a0c;
+            border-top: 1px solid #222;
+            padding: 10px;
+            padding-bottom: max(15px, env(safe-area-inset-bottom));
+            z-index: 2000;
+            position: fixed; bottom: 0; left: 0;
+        }
+
+        #input-bar { display: flex; gap: 10px; width: 100%; }
+
+        /* --- MESSAGE STYLES --- */
+        .chat-row { display: flex; align-items: flex-end; margin-bottom: 10px; width: 100%; }
+        .chat-row.me { justify-content: flex-end; }
+        .chat-row.other { justify-content: flex-start; }
+
+        .chat-avatar {
+            width: 36px; height: 36px; border-radius: 50%; margin-right: 10px; object-fit: cover;
+            border: 1px solid #333; flex-shrink: 0; cursor: pointer; background: #222; display: flex; align-items: center; justify-content: center;
+        }
+
+        .msg {
+            max-width: 88%; width: auto; word-wrap: break-word; margin-bottom: 10px; padding: 10px 15px;
+            background: rgba(255, 255, 255, 0.05); border-radius: 12px; color: #eee; position: relative; flex-shrink: 0;
+        }
+        .msg.me { align-self: flex-end; background: rgba(0, 100, 255, 0.1); border-bottom-right-radius: 2px; }
+        .msg:not(.me) { align-self: flex-start; border-bottom-left-radius: 2px; }
+
+        /* --- TYPING INDICATOR --- */
+        #typing-indicator {
+            position: fixed; bottom: 80px; left: 20px; color: var(--ice); font-size: 11px; font-style: italic;
+            display: none; z-index: 1900; text-shadow: 0 0 5px var(--ice);
+        }
+
+        /* --- OVERLAYS --- */
+        #ban-overlay {
+            position: fixed; inset: 0; background: #2a0505; z-index: 9999; display: none;
+            align-items: center; justify-content: center; flex-direction: column; text-align: center; color: #ff4444;
+        }
+        
+        #unban-overlay {
+            position: fixed; inset: 0; background: #052a05; z-index: 9999; display: none;
+            align-items: center; justify-content: center; flex-direction: column; text-align: center; color: #44ff44;
+        }
+
+        .profile-pic-large { width: 100px; height: 100px; border-radius: 50%; object-fit: cover; border: 3px solid var(--ice); margin-bottom: 15px; cursor: pointer; background: #222; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px auto; }
+        .header-avatar { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; cursor: pointer; border: 2px solid var(--ice); margin-right: 8px; display: flex; align-items: center; justify-content: center; background: #222; }
+        .header-icon { font-size: 28px; color: #fff; cursor: pointer; padding: 5px; }
+
+        .bio-input { width: 100%; background: #111; border: 1px solid #333; color: #eee; padding: 10px; border-radius: 8px; resize: none; height: 80px; margin-top: 10px; font-family: 'Inter', sans-serif; font-size: 13px; outline: none; }
+        .bio-input:focus { border-color: var(--ice); }
+
+        #sell-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 6000; display: none; align-items: center; justify-content: center; backdrop-filter: blur(10px); }
+        
+        #open-sell-btn { display: none; background: linear-gradient(135deg, var(--sys-yellow), #ffaa00); color: #000; font-weight: 900; font-size: 24px; border: none; width: 45px; height: 45px; border-radius: 50%; margin-right: 5px; cursor: pointer; box-shadow: 0 0 15px rgba(255, 200, 0, 0.3); transition: 0.2s; }
+        #open-sell-btn:active { transform: scale(0.95); }
+
+        .type-btn { flex: 1; padding: 12px; border-radius: 10px; font-weight: bold; cursor: pointer; border: 1px solid #333; background: #111; color: #666; transition: 0.3s; font-family: 'Inter', sans-serif; }
+        .type-btn.active-wts { background: rgba(68, 255, 68, 0.1); color: var(--sys-green); border: 1px solid var(--sys-green); box-shadow: 0 0 15px rgba(68, 255, 68, 0.2); }
+        .type-btn.active-wtb { background: rgba(255, 68, 68, 0.1); color: var(--sys-red); border: 1px solid var(--sys-red); box-shadow: 0 0 15px rgba(255, 68, 68, 0.2); }
+
+        .product-card { background: #0d1117; border: 1px solid #21262d; border-radius: 16px; padding: 16px; margin: 15px 0; position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 95%; min-width: 280px; flex-shrink: 0; display: block; clear: both; transition: all 0.3s ease; overflow: hidden; }
+        .card-tag { font-size: 10px; font-weight: 800; padding: 4px 8px; border-radius: 6px; position: absolute; top: 12px; left: 12px; text-transform: uppercase; letter-spacing: 1px; background: rgba(0,0,0,0.5); }
+        .card-del-btn { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; background: rgba(20, 20, 20, 0.9); color: #ff4444; border: 1px solid #333; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 100; transition: 0.2s; font-weight: bold; font-size: 18px; }
+        .card-del-btn:hover { background: #ff4444; color: white; transform: scale(1.1); }
+        .del-x { float: right; margin-left: 10px; color: #ff4444; cursor: pointer; font-weight: bold; font-size: 14px; }
+
+        .field-label { display: block; font-size: 9px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-top: 15px; font-weight: bold; }
+        .card-title { font-size: 16px; font-weight: bold; color: #fff; display: block; margin-top: 2px; word-wrap: break-word; }
+        .card-price-tag { font-family: 'Inter', monospace; font-size: 24px; font-weight: 900; letter-spacing: -1px; display: block; margin-top: 2px; }
+        .card-desc { font-size: 13px; color: #aaa; margin-bottom: 15px; display: block; border-top: 1px solid #333; padding-top: 5px; line-height: 1.4; word-wrap: break-word; }
+        .seller-info { display: flex; align-items: center; gap: 5px; margin-top: 35px; font-size: 11px; color: #888; }
+        .buy-btn { width: 100%; padding: 12px; margin-top: 10px; background: rgba(255,255,255,0.05); border: 1px solid #333; color: #fff; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; }
+
+        #toast { visibility: hidden; min-width: 200px; background-color: var(--sys-green); color: #000; text-align: center; border-radius: 50px; padding: 12px; position: fixed; z-index: 9999; left: 50%; top: 20px; transform: translateX(-50%); font-weight: bold; box-shadow: 0 0 20px rgba(68, 255, 68, 0.4); opacity: 0; transition: opacity 0.5s, top 0.5s; }
+        #toast.show { visibility: visible; opacity: 1; top: 60px; }
+
+        .hidden { display: none !important; }
+        #msg-in { flex: 1; padding: 12px 15px; border-radius: 25px; border: 1px solid #333; background: #111; color: white; outline: none; font-size: 16px; }
+        .send-btn { padding: 0 20px; border-radius: 25px; border: none; background: var(--ice); color: black; font-weight: 900; cursor: pointer; }
+        
+        input[type="color"] { -webkit-appearance: none; border: none; width: 100%; height: 40px; border-radius: 8px; cursor: pointer; background: none; }
+        input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+        input[type="color"]::-webkit-color-swatch { border: 1px solid #333; border-radius: 8px; }
+
+        /* SYS MSG COLOR FIX */
+        .sys-small { 
+            align-self: center !important; 
+            font-size: 11px !important; 
+            font-weight: 900 !important; 
+            margin: 12px 0 !important; 
+            text-transform: uppercase !important; 
+            letter-spacing: 1.5px !important; 
+            text-align: center !important;
+            display: block !important;
+            width: 100% !important;
+        }
+        
+        .leader-text { 
+            font-family: 'Inter', sans-serif; 
+            font-weight: 900; 
+            text-transform: uppercase; 
+            letter-spacing: 2px; 
+            animation: leader-pulse 1.5s infinite alternate; 
+        }
+        @keyframes leader-pulse { 
+            from { text-shadow: 0 0 5px currentColor; opacity: 0.8; } 
+            to { text-shadow: 0 0 20px currentColor, 0 0 5px white; opacity: 1; transform: scale(1.05); } 
+        }
+
+    </style>
+</head>
+<body>
+
+    <canvas id="bg-canvas"></canvas>
+    <div id="global-announcement"></div>
+    <div id="toast">Settings Saved!</div>
+
+    <div id="typing-indicator">... is typing</div>
+
+    <div id="sell-modal">
+        <div class="auth-card" style="border: 1px solid #333; width: 90%; max-width: 380px; background:#0a0c10; padding:25px;">
+            <h2 style="color:#fff; margin-bottom:20px; margin-top:0; font-size:18px; letter-spacing:1px;">NEW LISTING</h2>
+            <div style="display:flex; gap:10px; margin-bottom:20px;">
+                <button id="type-wts" class="type-btn active-wts" onclick="setListingType('WTS')">SELL (WTS)</button>
+                <button id="type-wtb" class="type-btn" onclick="setListingType('WTB')">BUY (WTB)</button>
+            </div>
+            <label class="field-label" style="color:#888; margin-top:0;">PRODUCT</label>
+            <input type="text" id="sell-title" placeholder="e.g. Rolex Submariner" maxlength="40" style="background:#161b22; border:1px solid #333; color:white; font-weight:bold;">
+            <label class="field-label" style="color:#888;">PRICE</label>
+            <input type="text" id="sell-price" placeholder="e.g. 15.000€" maxlength="20" style="background:#161b22; border:1px solid #333; color:var(--sys-yellow); font-weight:bold;">
+            <label class="field-label" style="color:#888;">DESCRIPTION (OPTIONAL)</label>
+            <textarea id="sell-desc" placeholder="Condition, Location..." style="width:100%; background:#161b22; border:1px solid #333; color:#aaa; border-radius:10px; padding:12px; font-family:'Inter'; height:100px; resize:none; outline:none; box-sizing: border-box; font-size:14px; line-height:1.4;"></textarea>
+            <div style="display:flex; gap:10px; margin-top:20px;">
+                <button onclick="submitListing()" style="flex:2; padding:14px; background:white; border:none; border-radius:10px; font-weight:900; cursor:pointer; color:#000;">POST NOW</button>
+                <button onclick="closeSellModal()" style="flex:1; background:transparent; border:1px solid #333; color:#666; border-radius:10px; cursor:pointer; font-weight:bold;">CANCEL</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="profile-overlay" onclick="closeProfile()">
+        <div class="profile-card" onclick="event.stopPropagation()">
+            <div id="p-avatar-container" style="text-align:center;">
+                <div id="p-avatar-display" class="profile-pic-large">
+                    <span class="material-icons" style="font-size: 50px; color: #fff;">person</span>
+                </div>
+            </div>
+
+            <h2 id="p-name" style="margin:0; color:var(--ice);">Name</h2>
+            <div id="p-custom-status" style="font-size:12px; color:var(--sys-green); margin-bottom:10px; min-height:15px;">Status...</div>
+            
+            <div id="p-edit-section" style="display:none; text-align:left; margin-bottom:15px;">
+                <label style="color:#888; font-size:11px; font-weight:bold;">YOUR COLOR</label>
+                <input type="color" id="p-color-picker" style="margin-bottom:10px;">
+            </div>
+
+            <div id="p-rank-container" style="font-size:11px; text-align:left; margin-bottom:5px;">
+                <span id="p-level-label">Level</span> <span id="p-level">1</span>
+            </div>
+            <div class="xp-bar"><div id="p-xp-fill" class="xp-fill"></div></div>
+            
+            <div id="p-bio-display" class="profile-bio"></div>
+            <textarea id="p-bio-edit" class="bio-input" style="display:none;" placeholder="Write your bio here..."></textarea>
+
+            <div class="profile-stats">
+                <div><b id="p-msgs">0</b><br>Messages</div>
+                <div><b id="p-joined">?</b><br>Joined</div>
+            </div>
+            <div id="profile-actions" style="margin-top:20px; display:flex; gap:10px;">
+                <button id="p-action-btn" style="flex:1; padding:10px; border-radius:10px; border:none; background:var(--ice); font-weight:bold;">Message</button>
+                <button onclick="closeProfile()" style="flex:1; padding:10px; border-radius:10px; border:1px solid #444; background:transparent; color:#fff;">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="ban-overlay">
+        <span class="material-icons" style="font-size: 80px; margin-bottom:20px;">gavel</span>
+        <h1 style="margin:0; font-size:32px; letter-spacing:5px;">BANNED</h1>
+        <p style="color:#ff8888; margin-top:10px;">Your access has been revoked.</p>
+        <div id="ban-timer" style="margin-top:20px; padding:10px 20px; border:1px solid #f00; border-radius:10px;">Checking...</div>
+    </div>
+    
+    <div id="unban-overlay">
+        <span class="material-icons" style="font-size: 80px; margin-bottom:20px;">check_circle</span>
+        <h1 style="margin:0; font-size:32px; letter-spacing:5px;">UNBANNED</h1>
+        <p style="color:#88ff88; margin-top:10px;">Welcome back.</p>
+    </div>
+
+    <div id="auth-screen">
+        <div class="auth-card">
+            <h2 id="auth-title" style="color:var(--ice); margin-bottom: 10px;">LOGIN</h2>
+            <div class="online-indicator">
+                <div class="dot"></div>
+                <span id="auth-online-counter">0/150 Users Online</span>
+            </div>
+            <small id="reg-info" class="info-txt hidden">Min. 5 chars • No special characters</small>
+            <input type="text" id="l-user" placeholder="Username" oninput="checkNameAvailability()">
+            <span id="name-status"></span>
+            <input type="password" id="l-pass" placeholder="Password">
+            <div id="confirm-box" class="hidden">
+                <input type="password" id="l-pass-confirm" placeholder="Confirm Password">
+            </div>
+            <button id="btn-login" onclick="auth('login')" style="width:100%; padding:12px; background:var(--ice); border:none; border-radius:10px; font-weight:bold; cursor:pointer; color:#000; margin-top:10px;">LOGIN</button>
+            <button id="btn-reg-ui" onclick="showRegUI()" style="width:100%; padding:12px; background:transparent; border:1px solid var(--ice); color:var(--ice); border-radius:10px; font-weight:bold; cursor:pointer; margin-top:10px;">JOIN NOW</button>
+            <span id="back-to-login" class="auth-toggle-link hidden" onclick="showLoginUI()">Back to Login</span>
+            <p id="auth-err"></p>
+            <div id="reset-reason-display"></div>
+        </div>
+    </div>
+
+    <header>
+        <div style="display:flex; align-items:center; gap:10px;">
+            <div class="logo" onclick="toggleTheme()">SUB-ZERO</div>
+            <div class="online-indicator" style="font-size:10px; margin-bottom:0;">
+                <div class="dot" style="width:6px; height:6px;"></div>
+                <span id="header-online-counter">0/150</span>
+            </div>
+        </div>
+        <div style="display:flex; gap:15px; align-items:center;">
+            <button class="msg-icon-btn" onclick="openMessenger()">
+                <span class="material-icons">forum</span>
+                <div id="global-badge" class="badge">0</div>
+            </button>
+            <div onclick="openMyProfile()" style="display:flex; align-items:center;">
+                <div id="header-pfp" class="header-avatar">
+                    <span class="material-icons" style="font-size: 20px; color: #fff;">person</span>
+                </div>
+            </div>
+            <span class="material-icons" style="color:var(--sys-red); cursor:pointer;" onclick="logout()">logout</span>
+        </div>
+    </header>
+
+    <div id="messenger-view">
+        <div class="msg-header">
+            <span class="material-icons" onclick="closeMessenger()" style="cursor:pointer">arrow_back</span>
+            <input type="text" id="find-user-input" class="search-bar" placeholder="Name#1234">
+            <span class="material-icons" onclick="sendFriendRequest()" style="color:var(--ice); cursor:pointer">person_add</span>
+        </div>
+        <div id="requests-area" style="padding:15px; border-bottom:1px solid #222;" class="hidden">
+            <small style="color:var(--ice); font-weight:bold;">PENDING REQUESTS</small>
+            <div id="requests-list"></div>
+        </div>
+        <div class="chat-list" id="chat-list"></div>
+    </div>
+
+    <div id="room-bar">
+        <div class="room-btn active" onclick="switchRoom('Main', this)">Main<div class="room-dot" id="dot-Main"></div></div>
+        <div class="room-btn" onclick="switchRoom('English', this)">English🇺🇸<div class="room-dot" id="dot-English"></div></div>
+        <div class="room-btn" onclick="switchRoom('German', this)">German🇩🇪<div class="room-dot" id="dot-German"></div></div>
+        <div class="room-btn" onclick="switchRoom('Buy & Sell', this)">Buy & Sell<div class="room-dot" id="dot-Buy-&-Sell"></div></div>
+        <div id="active-dm-tag" class="room-btn hidden" style="color:var(--sys-green)">DM</div>
+    </div>
+
+    <div id="chat"></div>
+    
+    <div id="bottom-area">
+        <div id="reply-preview" style="display:none;">
+            <span>Replying to <strong id="reply-user"></strong></span>
+            <span id="close-reply" onclick="cancelReply()">×</span>
+        </div>
+        <div id="input-bar">
+            <button id="open-sell-btn" onclick="openSellModal()">+</button>
+            <input type="text" id="msg-in" placeholder="Write message..." autocomplete="off" oninput="sendTyping()">
+            <button class="send-btn" onclick="send()">SENT</button>
+        </div>
+    </div>
+
+    <div id="admin-panel">
+        <button class="admin-btn" onclick="triggerGlobalAlert()"><span class="material-icons">campaign</span></button>
+    </div>
+
+    <script>
+        const API = "https://subzero-hc18.onrender.com";
+        const storageKey = 'sz_v_active';
+        const banKey = 'sz_ip_locked';
+        let session = JSON.parse(localStorage.getItem(storageKey)) || null;
+        let currentRoom = "Main", isDM = false, dmTarget = null, onlineUsers = [], lastMsgCounts = {}, currentResetId = null;
+        let themes = ['', 'theme-fire', 'theme-matrix', 'theme-gold'], currentThemeIdx = parseInt(localStorage.getItem('sz_theme_idx')) || 0;
+        let typingTimeout;
+        let replyData = null;
+        let listingType = 'WTS';
+
+        document.body.className = themes[currentThemeIdx];
+        
+        if(localStorage.getItem(banKey) === 'true') document.getElementById('ban-overlay').style.display = 'flex';
+
+        const savedReason = localStorage.getItem('sz_reset_reason');
+        if(savedReason) {
+            const reasonBox = document.getElementById('reset-reason-display');
+            reasonBox.innerText = "Logout Reason: " + savedReason;
+            reasonBox.style.display = 'block';
+            localStorage.removeItem('sz_reset_reason');
+        }
+
+        if(session) { 
+            document.getElementById('auth-screen').classList.add('hidden'); 
+            if(session.isAdmin) document.getElementById('admin-panel').style.display = 'block';
+            updateHeaderColor(session.color);
+            startApp(); 
+        }
+
+        function request(url) {
+            const s = document.createElement('script');
+            s.src = url + (url.includes('?') ? '&' : '?') + "t=" + Date.now();
+            document.body.appendChild(s);
+            s.onload = () => s.remove();
+        }
+
+        function showToast(text, color = "var(--sys-green)") {
+            const t = document.getElementById('toast');
+            t.innerText = text;
+            t.style.backgroundColor = color;
+            t.className = "show";
+            setTimeout(() => { t.className = t.className.replace("show", ""); }, 2000);
+        }
+
+        function updateHeaderColor(color) {
+            const hDiv = document.getElementById('header-pfp');
+            if(color) hDiv.style.borderColor = color;
+            const icon = hDiv.querySelector('.material-icons');
+            if(icon && color) icon.style.color = color;
+        }
+
+        function openMyProfile() { if(session) openProfile(session.user); }
+        function openProfile(name) { request(`${API}/get_profile?target=${encodeURIComponent(name)}&cb=renderProfile`); }
+        
+        function renderProfile(data) {
+            if(!data.success && data.success !== undefined) return;
+            const isAdmin = data.level >= 100 || data.isAdmin;
+            const levelVal = document.getElementById('p-level');
+            const isMe = session && (data.username === session.user);
+
+            const avatarDiv = document.getElementById('p-avatar-display');
+            avatarDiv.style.borderColor = data.color || 'var(--ice)';
+            const avatarIcon = avatarDiv.querySelector('.material-icons');
+            avatarIcon.style.color = data.color || '#fff';
+
+            if(isAdmin) {
+                document.getElementById('p-name').innerHTML = `${data.username.split('#')[0]} <span class="material-icons" style="font-size:24px; vertical-align:middle; color:var(--sys-red);">gavel</span>`;
+                document.getElementById('p-custom-status').innerHTML = `<span class="leader-text">LEADER</span>`;
+                levelVal.innerText = "∞";
+                document.getElementById('p-xp-fill').style.width = "100%";
+            } else {
+                document.getElementById('p-name').innerText = data.username;
+                document.getElementById('p-custom-status').innerText = data.customStatus;
+                levelVal.innerText = data.level;
+                const xpPercent = (data.xp / data.xpNeeded) * 100;
+                document.getElementById('p-xp-fill').style.width = xpPercent + "%";
+            }
+            
+            document.getElementById('p-name').style.color = data.color;
+            document.getElementById('p-msgs').innerText = data.messages;
+            document.getElementById('p-joined').innerText = data.joinedAt;
+            
+            const bioDisplay = document.getElementById('p-bio-display');
+            const bioEdit = document.getElementById('p-bio-edit');
+            const actBtn = document.getElementById('p-action-btn');
+            const editSection = document.getElementById('p-edit-section');
+            const colorPicker = document.getElementById('p-color-picker');
+
+            if (isMe) {
+                bioDisplay.style.display = 'none';
+                bioEdit.style.display = 'block';
+                editSection.style.display = 'block'; 
+                bioEdit.value = data.bio;
+                colorPicker.value = data.color || "#ffffff";
+                
+                actBtn.innerText = "SAVE CHANGES";
+                actBtn.onclick = () => {
+                    const newBio = document.getElementById('p-bio-edit').value;
+                    const newColor = document.getElementById('p-color-picker').value;
+                    const url = `${API}/update_profile_safe?user=${encodeURIComponent(session.user)}&bio=${encodeURIComponent(newBio)}&color=${encodeURIComponent(newColor)}&cb=profileUpdateCB`;
+                    request(url);
+                };
+            } else { 
+                bioDisplay.style.display = 'block';
+                bioEdit.style.display = 'none';
+                editSection.style.display = 'none';
+                bioDisplay.innerText = data.bio;
+                actBtn.innerText = "MESSAGE"; 
+                actBtn.onclick = () => { startDM(data.username); closeProfile(); }; 
+            }
+            document.getElementById('profile-overlay').style.display = 'flex';
+        }
+
+        function profileUpdateCB(data) {
+            if(data.success) {
+                showToast("SETTINGS SAVED", "var(--sys-green)");
+                if(data.color) {
+                    session.color = data.color;
+                    localStorage.setItem(storageKey, JSON.stringify(session));
+                    updateHeaderColor(data.color);
+                }
+                closeProfile();
+                setTimeout(() => location.reload(), 500);
+            } else {
+                showToast("ERROR: " + data.msg, "var(--sys-red)");
+            }
+        }
+
+        function closeProfile() { document.getElementById('profile-overlay').style.display = 'none'; }
+        function openSellModal() { document.getElementById('sell-modal').style.display = 'flex'; }
+        function closeSellModal() { document.getElementById('sell-modal').style.display = 'none'; }
+        function setListingType(t) { listingType = t; document.getElementById('type-wts').className = (t==='WTS'?'type-btn active-wts':'type-btn'); document.getElementById('type-wtb').className = (t==='WTB'?'type-btn active-wtb':'type-btn'); }
+        function toggleTheme() { currentThemeIdx = (currentThemeIdx + 1) % themes.length; document.body.className = themes[currentThemeIdx]; localStorage.setItem('sz_theme_idx', currentThemeIdx); }
+        
+        function sendTyping() { 
+            if(!session) return; 
+            request(`${API}/typing?user=${encodeURIComponent(session.user)}&room=${encodeURIComponent(currentRoom)}`); 
+        }
+
+        function triggerGlobalAlert() { const msg = prompt("Global Alert:"); if(msg) request(`${API}/send_safe?user=${encodeURIComponent(session.user)}&pass=${encodeURIComponent(session.pass)}&text=${encodeURIComponent('/alert ' + msg)}`); }
+        
+        function checkNameAvailability() {
+            if (document.getElementById('confirm-box').classList.contains('hidden')) {
+                document.getElementById('name-status').innerText = "";
+                return;
+            }
+            const u = document.getElementById('l-user').value.trim(); 
+            if(u.length===0) { document.getElementById('name-status').innerText=""; return; } 
+            request(`${API}/auth?mode=check&user=${encodeURIComponent(u)}&cb=checkCB`); 
+        }
+
+        function checkCB(r) { const s = document.getElementById('name-status'); if(r.isBanned) { localStorage.setItem(banKey, 'true'); location.reload(); return; } if(!r.valid) { s.innerText="✖ Invalid"; s.style.color="orange"; } else if(r.taken) { s.innerText="✖ Taken"; s.style.color="var(--sys-red)"; } else { s.innerText="✔ Available"; s.style.color="var(--sys-green)"; } }
+        function showRegUI() { document.getElementById('auth-title').innerText="SIGN UP"; document.getElementById('confirm-box').classList.remove('hidden'); document.getElementById('reg-info').classList.remove('hidden'); document.getElementById('btn-login').innerText="CREATE ACCOUNT"; document.getElementById('btn-login').setAttribute("onclick", "auth('register')"); document.getElementById('btn-reg-ui').classList.add('hidden'); document.getElementById('back-to-login').classList.remove('hidden'); }
+        function showLoginUI() { document.getElementById('auth-title').innerText="LOGIN"; document.getElementById('confirm-box').classList.add('hidden'); document.getElementById('reg-info').classList.add('hidden'); document.getElementById('name-status').innerText=""; document.getElementById('btn-login').innerText="LOGIN"; document.getElementById('btn-login').setAttribute("onclick", "auth('login')"); document.getElementById('btn-reg-ui').classList.remove('hidden'); document.getElementById('back-to-login').classList.add('hidden'); }
+        
+        function auth(mode) { 
+            const u = document.getElementById('l-user').value.trim(), p = document.getElementById('l-pass').value.trim(); 
+            let url = `${API}/auth?mode=${mode}&user=${encodeURIComponent(u)}&pass=${encodeURIComponent(p)}&cb=authCB`; 
+            if(mode === 'register') url += `&passConfirm=${encodeURIComponent(document.getElementById('l-pass-confirm').value.trim())}`; 
+            request(url); 
+        }
+        
+        function authCB(r) { 
+            if(r.isBanned) { localStorage.setItem(banKey, 'true'); location.reload(); return; } 
+            if(r.success) { 
+                if(r.msg === 'Created') { alert("Account created! You can now login."); showLoginUI(); } 
+                else { session = r; localStorage.setItem(storageKey, JSON.stringify(r)); location.reload(); } 
+            } else { document.getElementById('auth-err').innerText = "Invalid credentials"; } 
+        }
+
+        function openMessenger() { alert("Messenger system coming soon!"); }
+        function closeMessenger() { }
+        function loadSocial() { }
+        function startDM(name) { isDM = true; dmTarget = name; closeMessenger(); document.getElementById('active-dm-tag').innerText = "DM: "+name.split('#')[0]; document.getElementById('active-dm-tag').classList.remove('hidden'); document.querySelectorAll('.room-btn').forEach(b => b.classList.remove('active')); document.getElementById('active-dm-tag').classList.add('active'); loadMsgs(); }
+        function sendFriendRequest() { const n = document.getElementById('find-user-input').value.trim(); if(!n) return; request(`${API}/friend_request?user=${encodeURIComponent(session.user)}&pass=${encodeURIComponent(session.pass)}&targetName=${encodeURIComponent(n)}`); document.getElementById('find-user-input').value = ""; }
+        function handleReq(id, a) { request(`${API}/handle_request?user=${encodeURIComponent(session.user)}&pass=${encodeURIComponent(session.pass)}&requestId=${id}&action=${a}`); setTimeout(loadSocial, 500); }
+        function blockUser(id) { if(confirm("Block?")) { request(`${API}/handle_request?user=${encodeURIComponent(session.user)}&pass=${encodeURIComponent(session.pass)}&requestId=${id}&action=block`); setTimeout(loadSocial, 500); } }
+        
+        function switchRoom(n, el) { 
+            isDM = false; dmTarget = null; currentRoom = n; 
+            document.getElementById('active-dm-tag').classList.add('hidden'); 
+            document.querySelectorAll('.room-btn').forEach(b => b.classList.remove('active')); 
+            el.classList.add('active'); 
+            document.getElementById('open-sell-btn').style.display = (n==='Buy & Sell'?'block':'none'); 
+            document.getElementById('msg-in').placeholder=(n==='Buy & Sell'?"List item (+)":"Write message..."); 
+            loadMsgs(); 
+        }
+
+        function deleteMsg(id) { 
+            if(session.isAdmin || confirm("Delete this message?")) { 
+                request(`${API}/delete?id=${id}&user=${encodeURIComponent(session.user)}&pass=${encodeURIComponent(session.pass)}`); 
+                setTimeout(loadMsgs, 300); 
+            } 
+        }
+
+        function prepareReply(u) { replyData = u; document.getElementById('reply-user').innerText = u; document.getElementById('reply-preview').style.display = 'block'; document.getElementById('msg-in').focus(); }
+        function cancelReply() { replyData = null; document.getElementById('reply-preview').style.display = 'none'; }
+        
+        function submitListing() { 
+            const t = document.getElementById('sell-title').value.trim(), p = document.getElementById('sell-price').value.trim(), d = document.getElementById('sell-desc').value.trim(); 
+            if(!t || !p) return alert("Missing info"); 
+            const m = `$$MARKET$$|${listingType}|${t}|${p}|${d}`; 
+            request(`${API}/send_safe?user=${encodeURIComponent(session.user)}&pass=${encodeURIComponent(session.pass)}&text=${encodeURIComponent(m)}&room=${encodeURIComponent(currentRoom)}`); 
+            closeSellModal(); 
+            setTimeout(loadMsgs, 300); 
+        }
+
+        function displayMessages(d) {
+            const chat = document.getElementById('chat'); if(!Array.isArray(d)) return;
+            chat.innerHTML = d.map(m => {
+                if(m.isAlert) return `<div class="admin-join-banner">ADMIN: ${m.text}</div>`;
+                
+                const isSystem = m.user === "SYSTEM";
+                const isMe = session && m.user === session.user;
+                const isAdminJoin = isSystem && m.text.includes("ADMIN IS HERE");
+
+                if(isSystem) {
+                    return `<div class="sys-small ${isAdminJoin ? 'leader-text' : ''}" style="color:${m.color} !important;">${m.text}</div>`;
+                }
+                
+                const isAdminDel = m.text === "$$ADMIN_DEL$$", isUserDel = m.text === "$$USER_DEL$$", isDel = isAdminDel || isUserDel;
+                let c = isDel ? (isAdminDel ? "<i style='color:#f44'>Removed by Admin</i>" : "<i style='color:#666'>Deleted</i>") : m.text;
+                let isCard = !isDel && m.text.includes('$$MARKET$$');
+                
+                let av = `<div class="chat-avatar" onclick="openProfile('${m.user}')" style="border-color:${m.color||'#333'};"><span class="material-icons" style="font-size:18px; color:${m.color||'#666'}">person</span></div>`;
+
+                if(isCard) {
+                    const p = m.text.replace('$$MARKET$$|','').split('|');
+                    const showDel = !isDel && (session.isAdmin || isMe);
+                    return `<div class="product-card" style="border-left:4px solid ${m.color}" onclick="startDM('${m.user}')">
+                        ${showDel?`<span class="card-del-btn material-icons" onclick="event.stopPropagation(); deleteMsg('${m._id}')">close</span>`:''}
+                        <div class="card-tag">${p[0]}</div>
+                        <div class="seller-info">Seller: <b style="color:${m.color}">${m.user}</b></div>
+                        <span class="field-label">PRODUCT</span><span class="card-title">${p[1]}</span>
+                        <span class="field-label">PRICE</span><span class="card-price-tag" style="color:var(--sys-yellow)">${p[2]}</span>
+                        <span class="field-label">DESC</span><span class="card-desc">${p[3]}</span>
+                        ${!isMe?`<button class="buy-btn">CONTACT</button>`:''}
+                    </div>`;
+                }
+
+                return `<div class="chat-row ${isMe?'me':'other'}">
+                    ${!isMe?av:''}
+                    <div class="msg ${isMe?'me':''}" style="border-${isMe?'right':'left'}-color:${m.color}">
+                        ${!isDel && (session.isAdmin || isMe) ? `<span class="del-x" onclick="deleteMsg('${m._id}')">×</span>` : ''}
+                        <div style="font-size:9px; opacity:0.6">${m.time}</div>
+                        <b style="color:${m.color}; cursor:pointer" onclick="openProfile('${m.user}')">${m.user}</b><br>
+                        <span>${c}</span>
+                    </div>
+                </div>`;
+            }).join('');
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        function send() { const t = document.getElementById('msg-in').value.trim(); if(!t) return; const m = replyData ? `@${replyData} ${t}` : t; if(replyData) cancelReply(); request(`${API}/send_safe?user=${encodeURIComponent(session.user)}&pass=${encodeURIComponent(session.pass)}&text=${encodeURIComponent(m)}&room=${encodeURIComponent(currentRoom)}`); document.getElementById('msg-in').value=""; setTimeout(loadMsgs,300); }
+        function loadMsgs() { request(`${API}/messages_jsonp?room=${encodeURIComponent(currentRoom)}&callback=displayMessages`); }
+        
+        function startApp() { 
+            loadMsgs(); 
+            setInterval(() => { 
+                if(localStorage.getItem(banKey)!=='true') loadMsgs(); 
+                request(`${API}/check_updates?user=${encodeURIComponent(session?session.user:'')}&room=${currentRoom}&callback=updateBadges`); 
+            }, 1500); 
+        }
+
+        function updateBadges(d) {
+            const banUI = document.getElementById('ban-overlay');
+            const unbanUI = document.getElementById('unban-overlay');
+
+            if(d.isBanned) {
+                localStorage.setItem(banKey, 'true');
+                banUI.style.display = 'flex';
+                document.getElementById('ban-timer').innerText = "Time left: " + d.banTimeLeft;
+                return;
+            } else if(localStorage.getItem(banKey) === 'true') {
+                localStorage.removeItem(banKey);
+                banUI.style.display = 'none';
+                unbanUI.style.display = 'flex';
+                setTimeout(() => { unbanUI.style.display = 'none'; }, 3000);
+            }
+
+            document.getElementById('auth-online-counter').innerText = d.onlineCount + "/150";
+            document.getElementById('header-online-counter').innerText = d.onlineCount + "/150";
+
+            const ty = document.getElementById('typing-indicator');
+            if(d.typingUser && d.typingUser !== session.user) {
+                ty.innerText = d.typingUser + " is typing...";
+                ty.style.display = 'block';
+                clearTimeout(typingTimeout);
+                typingTimeout = setTimeout(() => { ty.style.display = 'none'; }, 3000);
+            } else {
+                ty.style.display = 'none';
+            }
+            
+            if(d.myColor && d.myColor !== session.color) {
+                session.color = d.myColor;
+                localStorage.setItem(storageKey, JSON.stringify(session));
+                updateHeaderColor(d.myColor);
+            }
+        }
+
+        function logout() { 
+            if(session) request(`${API}/logout_notify?user=${encodeURIComponent(session.user)}&room=${encodeURIComponent(currentRoom)}`); 
+            localStorage.removeItem(storageKey); 
+            location.reload(); 
+        }
+
+        document.getElementById('msg-in').onkeypress = (e) => { if(e.key === "Enter") send(); };
+    </script>
+</body>
+</html>
