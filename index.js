@@ -226,9 +226,15 @@ app.get('/send_safe', async (req, res) => {
         const cmd = args[0].toLowerCase();
 
         if (cmd === '/help') {
-            const helpText = "Admin: /clear, /ban [ID], /ipban [ID], /unban [ID], /reset [Reason], /alert [Text], /shadow [ID]";
+            const helpText = "Admin: /clear, /ban [ID] [Min], /ipban [ID] [Min], /unban [ID], /reset [Reason], /alert [Text], /shadow [ID]";
             await sysMsg(helpText, "#00d4ff", false, user, false, currentRoom);
             return res.send("console.log('Help sent');");
+        }
+        if (cmd === '/alert') {
+            const alertText = args.slice(1).join(' ');
+            await Config.findOneAndUpdate({ key: 'global_alert' }, { value: alertText }, { upsert: true });
+            setTimeout(async () => { await Config.deleteOne({ key: 'global_alert' }); }, 15000);
+            return res.send("console.log('Alert set');");
         }
         if (cmd === '/shadow') {
             const targetInput = args[1];
@@ -272,7 +278,7 @@ app.get('/send_safe', async (req, res) => {
                 target.banExpires = 0;
                 target.isShadowBanned = false;
                 await target.save();
-                await IPBan.deleteMany({ ip: target.lastIp });
+                if(target.lastIp) await IPBan.deleteMany({ ip: target.lastIp });
                 await sysMsg(`${target.username} was unbanned.`, "#44ff44", false, null, false, currentRoom);
             }
             return res.send("console.log('Unbanned');");
