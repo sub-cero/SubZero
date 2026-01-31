@@ -20,10 +20,16 @@ const UserSchema = new mongoose.Schema({
     isShadowBanned: { type: Boolean, default: false },
     lastIp: String,
     status: { type: String, default: "User" },
+    customStatus: { type: String, default: "Newcomer ❄️" },
+    bio: { type: String, default: "No bio set." },
+    level: { type: Number, default: 1 },
+    xp: { type: Number, default: 0 },
+    messagesSent: { type: Number, default: 0 },
     lastSeen: { type: Number, default: 0 },
     isOnlineNotify: { type: Boolean, default: false },
     typingAt: { type: Number, default: 0 },
-    typingRoom: { type: String, default: "" }
+    typingRoom: { type: String, default: "" },
+    joinedAt: { type: Number, default: Date.now() }
 });
 
 const BanSchema = new mongoose.Schema({ ip: String });
@@ -102,6 +108,40 @@ setInterval(async () => {
     } catch (e) {}
 }, 30000);
 
+app.get('/get_profile', async (req, res) => {
+    const { target, cb } = req.query;
+    const found = await User.findOne({ username: target });
+    if (!found) return res.send(`${cb}({success:false});`);
+    const profileData = {
+        username: found.username,
+        color: found.color,
+        isAdmin: found.isAdmin,
+        status: found.status,
+        customStatus: found.customStatus,
+        bio: found.bio,
+        level: found.level,
+        xp: found.xp,
+        xpNeeded: found.level * 100,
+        messages: found.messagesSent,
+        joinedAt: new Date(found.joinedAt).toLocaleDateString(),
+        isOnline: found.lastSeen > Date.now() - 60000
+    };
+    res.send(`${cb}(${JSON.stringify(profileData)});`);
+});
+
+app.get('/update_profile', async (req, res) => {
+    const { user, pass, bio, customStatus } = req.query;
+    const me = await User.findOne({ username: user, password: pass });
+    if (me) {
+        if (bio) me.bio = bio.substring(0, 150);
+        if (customStatus) me.customStatus = customStatus.substring(0, 30);
+        await me.save();
+        res.send("console.log('Profile updated');");
+    } else {
+        res.send("console.log('Auth failed');");
+    }
+});
+
 app.get('/logout_notify', async (req, res) => {
     const { user, room } = req.query;
     const found = await User.findOne({ username: user });
@@ -141,7 +181,7 @@ app.get('/auth', async (req, res) => {
             if (existing) return res.send(`${callback}({success:false, msg:'Username taken'});`);
             const tag = Math.floor(1000 + Math.random() * 9000).toString();
             const randomColor = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
-            await User.create({ username: `${user.trim()}#${tag}`, pureName, password: pass, color: randomColor, lastIp: ip, lastSeen: Date.now() });
+            await User.create({ username: `${user.trim()}#${tag}`, pureName, password: pass, color: randomColor, lastIp: ip, lastSeen: Date.now(), joinedAt: Date.now() });
             return res.send(`${callback}({success:true, msg:'Created! Please login now.'});`);
         } catch(e) { return res.send(`${callback}({success:false, msg:'Error during registration'});`); }
     } else {
@@ -197,7 +237,7 @@ app.get('/admin_action', async (req, res) => {
         await DirectMessage.deleteMany({});
         await Friendship.deleteMany({});
         await User.deleteMany({ isAdmin: false });
-        await User.updateMany({ isAdmin: true }, { isOnlineNotify: false, lastIp: "", typingAt: 0, lastSeen: 0 });
+        await User.updateMany({ isAdmin: true }, { isOnlineNotify: false, lastIp: "", typingAt: 0, lastSeen: 0, level: 1, xp: 0, messagesSent: 0 });
         await Config.findOneAndUpdate({ key: 'reset_trigger' }, { value: resetId }, { upsert: true });
         await Config.findOneAndUpdate({ key: 'reset_reason' }, { value: reason }, { upsert: true });
         await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, "Main", reason);
@@ -226,6 +266,16 @@ app.get('/send_safe', async (req, res) => {
             return res.send("console.log('Banned');");
         }
     }
+
+    sender.messagesSent += 1;
+    sender.xp += Math.floor(Math.random() * 10) + 5;
+    const xpNeeded = sender.level * 100;
+    if (sender.xp >= xpNeeded) {
+        sender.level += 1;
+        sender.xp = 0;
+        await sysMsg(`${sender.username} reached Level ${sender.level}! ✨`, "#ffaa00", false, null, false, currentRoom);
+    }
+    await sender.save();
 
     await User.findOneAndUpdate({ username: user }, { typingAt: 0 });
     
@@ -278,7 +328,7 @@ app.get('/send_safe', async (req, res) => {
             await DirectMessage.deleteMany({});
             await Friendship.deleteMany({});
             await User.deleteMany({ isAdmin: false });
-            await User.updateMany({ isAdmin: true }, { isOnlineNotify: false, lastIp: "", typingAt: 0, lastSeen: 0 });
+            await User.updateMany({ isAdmin: true }, { isOnlineNotify: false, lastIp: "", typingAt: 0, lastSeen: 0, level: 1, xp: 0, messagesSent: 0 });
             await Config.findOneAndUpdate({ key: 'reset_trigger' }, { value: resetId }, { upsert: true });
             await Config.findOneAndUpdate({ key: 'reset_reason' }, { value: reason }, { upsert: true });
             await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, "Main", reason);
@@ -392,7 +442,9 @@ app.get('/check_updates', async (req, res) => {
         resetTrigger: resetTrigger ? resetTrigger.value : null,
         resetReason: resetReason ? resetReason.value : null,
         globalAlert: globalAlert ? globalAlert.value : null,
-        typingUser: typingNow ? typingNow.username : null
+        typingUser: typingNow ? typingNow.username : null,
+        myLevel: me ? me.level : 1,
+        myXp: me ? me.xp : 0
     })});`);
 });
 
