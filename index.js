@@ -219,32 +219,6 @@ app.get('/delete', async (req, res) => {
     }
 });
 
-app.get('/admin_action', async (req, res) => {
-    const { mode, text, user, pass } = req.query;
-    const admin = await User.findOne({ username: user, password: pass, isAdmin: true });
-    if (!admin) return res.send("console.log('Denied');");
-
-    if (mode === 'alert') {
-        await Config.findOneAndUpdate({ key: 'global_alert' }, { value: text }, { upsert: true });
-        setTimeout(async () => { await Config.deleteOne({ key: 'global_alert' }); }, 15000);
-        res.send("console.log('Alert set');");
-    }
-
-    if (mode === 'reset_all' || mode === 'reset') {
-        const reason = text || "System Update";
-        const resetId = Date.now().toString();
-        await Message.deleteMany({});
-        await DirectMessage.deleteMany({});
-        await Friendship.deleteMany({});
-        await User.deleteMany({ isAdmin: false });
-        await User.updateMany({ isAdmin: true }, { isOnlineNotify: false, lastIp: "", typingAt: 0, lastSeen: 0, level: 1, xp: 0, messagesSent: 0 });
-        await Config.findOneAndUpdate({ key: 'reset_trigger' }, { value: resetId }, { upsert: true });
-        await Config.findOneAndUpdate({ key: 'reset_reason' }, { value: reason }, { upsert: true });
-        await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, "Main", reason);
-        res.send("console.log('System Reset executed');");
-    }
-});
-
 app.get('/typing', async (req, res) => {
     const { user, room } = req.query;
     await User.findOneAndUpdate({ username: user }, { typingAt: Date.now(), typingRoom: room });
