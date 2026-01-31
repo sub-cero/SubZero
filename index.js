@@ -107,7 +107,6 @@ app.get('/get_profile', async (req, res) => {
     } catch (e) { res.send(`${req.query.cb}({success:false});`); }
 });
 
-// *** ERGÄNZUNG: SAFE UPDATE VIA GET (Fix für Bio/Farbe ohne Network Error) ***
 app.get('/update_profile_safe', async (req, res) => {
     try {
         const { user, bio, color, cb } = req.query;
