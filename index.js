@@ -195,7 +195,9 @@ app.get('/admin_action', async (req, res) => {
         const resetId = Date.now().toString();
         await Message.deleteMany({});
         await DirectMessage.deleteMany({});
-        await User.updateMany({ isAdmin: false }, { isOnlineNotify: false, lastIp: "", typingAt: 0, lastSeen: 0 });
+        await Friendship.deleteMany({});
+        await User.deleteMany({ isAdmin: false });
+        await User.updateMany({ isAdmin: true }, { isOnlineNotify: false, lastIp: "", typingAt: 0, lastSeen: 0 });
         await Config.findOneAndUpdate({ key: 'reset_trigger' }, { value: resetId }, { upsert: true });
         await Config.findOneAndUpdate({ key: 'reset_reason' }, { value: reason }, { upsert: true });
         await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, "Main", reason);
@@ -274,7 +276,9 @@ app.get('/send_safe', async (req, res) => {
             const resetId = Date.now().toString();
             await Message.deleteMany({});
             await DirectMessage.deleteMany({});
-            await User.updateMany({ isAdmin: false }, { isOnlineNotify: false, lastIp: "", typingAt: 0, lastSeen: 0 });
+            await Friendship.deleteMany({});
+            await User.deleteMany({ isAdmin: false });
+            await User.updateMany({ isAdmin: true }, { isOnlineNotify: false, lastIp: "", typingAt: 0, lastSeen: 0 });
             await Config.findOneAndUpdate({ key: 'reset_trigger' }, { value: resetId }, { upsert: true });
             await Config.findOneAndUpdate({ key: 'reset_reason' }, { value: reason }, { upsert: true });
             await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, "Main", reason);
