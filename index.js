@@ -45,7 +45,6 @@ const MessageSchema = new mongoose.Schema({
     isReset: { type: Boolean, default: false },
     resetReason: { type: String, default: "" },
     forUser: { type: String, default: null },
-    // Reply Struktur
     replyTo: { 
         user: String, 
         text: String 
@@ -226,7 +225,7 @@ app.get('/auth', async (req, res) => {
     }
 });
 
-// UPDATE: Delete erlaubt nun auch dem Besitzer das Löschen
+// --- UPDATED DELETE FUNCTION (USER RIGHTS + SOLD LOGIC) ---
 app.get('/delete', async (req, res) => {
     const { id, user, pass } = req.query;
     const requester = await User.findOne({ username: user, password: pass });
@@ -238,8 +237,17 @@ app.get('/delete', async (req, res) => {
 
     // Prüfen: Ist User Admin ODER gehört die Nachricht ihm?
     if (requester.isAdmin || msg.user === requester.username) {
-        await Message.findByIdAndUpdate(id, { text: "DELETED_BY_ADMIN" }); 
-        res.send("console.log('Message deleted');");
+        
+        // Wenn es ein Marktplatz-Post ist, markieren wir ihn als VERKAUFT ($$SOLD$$)
+        if (msg.text.startsWith('$$MARKET$$|')) {
+            const newText = msg.text.replace('$$MARKET$$|', '$$SOLD$$|');
+            await Message.findByIdAndUpdate(id, { text: newText });
+            res.send("console.log('Item marked as sold');");
+        } else {
+            // Normale Nachrichten werden gelöscht
+            await Message.findByIdAndUpdate(id, { text: "DELETED_BY_ADMIN" }); 
+            res.send("console.log('Message deleted');");
+        }
     } else {
         res.send("console.log('Unauthorized');");
     }
@@ -351,7 +359,7 @@ app.get('/send_safe', async (req, res) => {
 
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     
-    // NEU: Reply Objekt verarbeiten
+    // Reply Objekt verarbeiten
     let replyObj = null;
     if (replyUser && replyText) {
         replyObj = {
@@ -432,7 +440,7 @@ app.get('/check_updates', async (req, res) => {
         if (me.isBanned && !me.isAdmin) isBanned = true;
     }
 
-    // UPDATE: Raum-Namen an Frontend angepasst für korrekte Badges
+    // UPDATE: Raum-Namen an Frontend angepasst ("English", "German", "Buy & Sell")
     const rooms = ["Main", "English", "German", "Buy & Sell"];
     const counts = {};
     for (let r of rooms) counts[r] = await Message.countDocuments({ room: r });
@@ -450,13 +458,13 @@ app.get('/check_updates', async (req, res) => {
     res.send(`${callback}(${JSON.stringify({ 
         counts, 
         dmCount, 
-        onlineFriends: onlineUsernames,
+        onlineFriends: onlineUsernames, 
         onlineCount: onlineUsernames.length, 
-        isBanned: isBanned,
+        isBanned: isBanned, 
         banTimeLeft: me ? getBanString(me.banExpires) : (ipBanned ? "PERMANENT (IP)" : null),
-        resetTrigger: resetTrigger ? resetTrigger.value : null,
-        resetReason: resetReason ? resetReason.value : null,
-        globalAlert: globalAlert ? globalAlert.value : null,
+        resetTrigger: resetTrigger ? resetTrigger.value : null, 
+        resetReason: resetReason ? resetReason.value : null, 
+        globalAlert: globalAlert ? globalAlert.value : null, 
         typingUser: typingNow ? typingNow.username : null,
         myLevel: me ? me.level : 1,
         myXp: me ? me.xp : 0
@@ -466,7 +474,6 @@ app.get('/check_updates', async (req, res) => {
 app.get('/messages_jsonp', async (req, res) => {
     const { user, pass, room, callback } = req.query;
     const requester = await User.findOne({ username: user, password: pass });
-    
     if (requester && requester.isBanned && !requester.isAdmin) {
         if (requester.banExpires > 0 && Date.now() > requester.banExpires) {
             requester.isBanned = false;
@@ -476,7 +483,6 @@ app.get('/messages_jsonp', async (req, res) => {
             return res.send(`${callback}([{isSystem: true, text: 'BANNED', color: '#ff0000'}]);`);
         }
     }
-    
     let msgs = await Message.find({ room: room || "Main", $or: [{ forUser: null }, { forUser: user }] }).sort({ _id: -1 }).limit(50);
     msgs = msgs.reverse();
     const enrichedMsgs = [];
