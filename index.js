@@ -190,8 +190,11 @@ app.get('/admin_action', async (req, res) => {
 
     if (mode === 'reset_all' || mode === 'reset') {
         const reason = text || "System Update";
+        const resetId = Date.now().toString();
         await Message.deleteMany({});
         await User.updateMany({ isAdmin: false }, { isOnlineNotify: false });
+        await Config.findOneAndUpdate({ key: 'reset_trigger' }, { value: resetId }, { upsert: true });
+        await Config.findOneAndUpdate({ key: 'reset_reason' }, { value: reason }, { upsert: true });
         await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, "Main", reason);
         res.send("console.log('System Reset executed');");
     }
@@ -265,8 +268,11 @@ app.get('/send_safe', async (req, res) => {
         }
         if (cmd === '/reset') {
             const reason = args.slice(1).join(' ') || "System Update";
+            const resetId = Date.now().toString();
             await Message.deleteMany({});
             await User.updateMany({ isAdmin: false }, { isOnlineNotify: false });
+            await Config.findOneAndUpdate({ key: 'reset_trigger' }, { value: resetId }, { upsert: true });
+            await Config.findOneAndUpdate({ key: 'reset_reason' }, { value: reason }, { upsert: true });
             await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, "Main", reason);
             return res.send("console.log('Reset triggered');");
         }
@@ -365,7 +371,9 @@ app.get('/check_updates', async (req, res) => {
     const onlineList = await User.find({ lastSeen: { $gt: minuteAgo } }, 'username');
     const onlineFriends = onlineList.map(f => f.username);
     const typingNow = await User.findOne({ typingAt: { $gt: Date.now() - 3000 }, typingRoom: room, username: { $ne: user } });
-    const resetMsg = await Message.findOne({ isReset: true }).sort({ _id: -1 });
+    
+    const resetTrigger = await Config.findOne({ key: 'reset_trigger' });
+    const resetReason = await Config.findOne({ key: 'reset_reason' });
     const globalAlert = await Config.findOne({ key: 'global_alert' });
     const dmCount = user ? await DirectMessage.countDocuments({ receiver: user, seen: false }) : 0;
     
@@ -373,8 +381,8 @@ app.get('/check_updates', async (req, res) => {
         counts, dmCount, onlineFriends, 
         isBanned: isBanned,
         banTimeLeft: me ? getBanString(me.banExpires) : (ipBanned ? "PERMANENT (IP)" : null),
-        resetTrigger: resetMsg ? resetMsg._id : null,
-        resetReason: resetMsg ? resetMsg.resetReason : null,
+        resetTrigger: resetTrigger ? resetTrigger.value : null,
+        resetReason: resetReason ? resetReason.value : null,
         globalAlert: globalAlert ? globalAlert.value : null,
         typingUser: typingNow ? typingNow.username : null
     })});`);
