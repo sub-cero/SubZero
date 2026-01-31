@@ -29,7 +29,7 @@ const UserSchema = new mongoose.Schema({
     isOnlineNotify: { type: Boolean, default: false },
     typingAt: { type: Number, default: 0 },
     typingRoom: { type: String, default: "" },
-    joinedAt: { type: Number, default: Date.now() }
+    joinedAt: { type: Number, default: Date.now }
 });
 
 const BanSchema = new mongoose.Schema({ ip: String });
@@ -174,7 +174,6 @@ app.get('/auth', async (req, res) => {
         if (onlineCount >= 150) {
             return res.send(`${callback}({success:false, msg:'Server full (150/150). Try later!'});`);
         }
-
         const validate = (str) => /^[a-zA-Z0-9]{5,}$/.test(str);
         if (!validate(user) || !validate(pass)) {
             return res.send(`${callback}({success:false, msg:'Min. 5 chars, no special characters!'});`);
@@ -194,12 +193,10 @@ app.get('/auth', async (req, res) => {
     } else {
         const found = await User.findOne({ pureName: user?.trim().toLowerCase(), password: pass });
         if (!found) return res.send(`${callback}({success:false, msg:'Login failed'});`);
-
         const alreadyOnline = found.lastSeen > minuteAgo;
         if (!alreadyOnline && onlineCount >= 150 && !found.isAdmin) {
             return res.send(`${callback}({success:false, msg:'Server full (150/150)'});`);
         }
-
         if (found.isBanned && !found.isAdmin) {
             if (found.banExpires > 0 && Date.now() > found.banExpires) {
                 found.isBanned = false;
@@ -243,7 +240,6 @@ app.get('/send_safe', async (req, res) => {
     const currentRoom = room || "Main";
     const sender = await User.findOne({ username: user, password: pass });
     if (!sender) return res.send("console.log('Auth error');");
-
     if (sender.isBanned && !sender.isAdmin) {
         if (sender.banExpires > 0 && Date.now() > sender.banExpires) {
             sender.isBanned = false;
@@ -253,7 +249,6 @@ app.get('/send_safe', async (req, res) => {
             return res.send("console.log('Banned');");
         }
     }
-
     sender.messagesSent += 1;
     sender.xp += Math.floor(Math.random() * 10) + 5;
     const xpNeeded = sender.level * 100;
@@ -263,13 +258,11 @@ app.get('/send_safe', async (req, res) => {
         await sysMsg(`${sender.username} reached Level ${sender.level}! ✨`, "#ffaa00", false, null, false, currentRoom);
     }
     await sender.save();
-
     await User.findOneAndUpdate({ username: user }, { typingAt: 0 });
     
     if (sender.isAdmin && text.startsWith('/')) {
         const args = text.split(' ');
         const cmd = args[0].toLowerCase();
-
         if (cmd === '/help') {
             const helpText = "Admin: /clear, /ban [ID], /ipban [ID], /unban [ID], /reset [Reason], /alert [Text], /shadow [ID]";
             await sysMsg(helpText, "#00d4ff", false, user, false, currentRoom);
@@ -335,7 +328,6 @@ app.get('/send_safe', async (req, res) => {
             return res.send("console.log('Unbanned');");
         }
     }
-
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     await Message.create({ 
         user, text, color: sender.color, status: sender.status, 
@@ -402,26 +394,21 @@ app.get('/check_updates', async (req, res) => {
     const ipBanned = await IPBan.findOne({ ip });
     let me = user ? await User.findOne({ username: user }) : null;
     let isBanned = !!ipBanned;
-
     if (me) {
         await User.findOneAndUpdate({ username: user }, { lastSeen: Date.now() });
         if (me.isBanned && !me.isAdmin) isBanned = true;
     }
-
     const rooms = ["Main", "Love", "Find friends", "Beef"];
     const counts = {};
     for (let r of rooms) counts[r] = await Message.countDocuments({ room: r });
-    
     const minuteAgo = Date.now() - 60000;
     const onlineList = await User.find({ lastSeen: { $gt: minuteAgo } }, 'username');
     const onlineUsernames = onlineList.map(f => f.username);
     const typingNow = await User.findOne({ typingAt: { $gt: Date.now() - 3000 }, typingRoom: room, username: { $ne: user } });
-    
     const resetTrigger = await Config.findOne({ key: 'reset_trigger' });
     const resetReason = await Config.findOne({ key: 'reset_reason' });
     const globalAlert = await Config.findOne({ key: 'global_alert' });
     const dmCount = user ? await DirectMessage.countDocuments({ receiver: user, seen: false }) : 0;
-    
     res.send(`${callback}(${JSON.stringify({ 
         counts, 
         dmCount, 
@@ -441,7 +428,6 @@ app.get('/check_updates', async (req, res) => {
 app.get('/messages_jsonp', async (req, res) => {
     const { user, pass, room, callback } = req.query;
     const requester = await User.findOne({ username: user, password: pass });
-    
     if (requester && requester.isBanned && !requester.isAdmin) {
         if (requester.banExpires > 0 && Date.now() > requester.banExpires) {
             requester.isBanned = false;
@@ -451,7 +437,6 @@ app.get('/messages_jsonp', async (req, res) => {
             return res.send(`${callback}([{isSystem: true, text: 'BANNED', color: '#ff0000'}]);`);
         }
     }
-    
     let msgs = await Message.find({ room: room || "Main", $or: [{ forUser: null }, { forUser: user }] }).sort({ _id: -1 }).limit(50);
     msgs = msgs.reverse();
     const enrichedMsgs = [];
