@@ -42,7 +42,12 @@ const MessageSchema = new mongoose.Schema({
     isAlert: { type: Boolean, default: false },
     isReset: { type: Boolean, default: false },
     resetReason: { type: String, default: "" },
-    forUser: { type: String, default: null } 
+    forUser: { type: String, default: null },
+    // NEU: Speichert Reply-Daten für die Profi-Antwort-Funktion
+    replyTo: { 
+        user: String, 
+        text: String 
+    }
 });
 
 const FriendshipSchema = new mongoose.Schema({
@@ -236,7 +241,8 @@ app.get('/typing', async (req, res) => {
 });
 
 app.get('/send_safe', async (req, res) => {
-    const { user, text, pass, room } = req.query;
+    // NEU: replyUser und replyText Parameter akzeptieren
+    const { user, text, pass, room, replyUser, replyText } = req.query;
     const currentRoom = room || "Main";
     const sender = await User.findOne({ username: user, password: pass });
     if (!sender) return res.send("console.log('Auth error');");
@@ -329,9 +335,20 @@ app.get('/send_safe', async (req, res) => {
         }
     }
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    // NEU: Reply Objekt erstellen
+    let replyObj = null;
+    if (replyUser && replyText) {
+        replyObj = {
+            user: replyUser,
+            text: replyText.substring(0, 50) + (replyText.length > 50 ? "..." : "") // Text kürzen für Clean-Look
+        };
+    }
+
     await Message.create({ 
         user, text, color: sender.color, status: sender.status, 
-        time, room: currentRoom, forUser: sender.isShadowBanned ? user : null 
+        time, room: currentRoom, forUser: sender.isShadowBanned ? user : null,
+        replyTo: replyObj // Hier wird die Antwort gespeichert
     });
     res.send("console.log('Sent');");
 });
