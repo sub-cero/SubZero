@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V32: System Online ❄️")).catch(err => console.error(err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V32: System Online ❄️")).catch(err => console.error("Mongo Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
@@ -98,15 +98,33 @@ app.get('/get_profile', async (req, res) => {
             username: found.username, 
             color: found.color || "#ffffff",
             isAdmin: found.isAdmin,
-            status: found.status, customStatus: found.customStatus, 
-            bio: found.bio,
-            pfp: found.pfp,
+            status: found.status, customStatus: found.customStatus, bio: found.bio,
             level: found.level, xp: found.xp, xpNeeded: found.level * 100,
             messages: found.messagesSent, joinedAt: new Date(found.joinedAt).toLocaleDateString(),
             isOnline: found.lastSeen > Date.now() - 60000
         };
         res.send(`${cb}(${JSON.stringify(profileData)});`);
     } catch (e) { res.send(`${req.query.cb}({success:false});`); }
+});
+
+// *** ERGÄNZUNG: SAFE UPDATE VIA GET (Fix für Bio/Farbe) ***
+app.get('/update_profile_safe', async (req, res) => {
+    try {
+        const { user, bio, color, cb } = req.query;
+        const updateFields = {};
+        if (bio !== undefined) updateFields.bio = bio.substring(0, 150);
+        if (color !== undefined) updateFields.color = color;
+
+        const result = await User.updateOne({ username: user }, { $set: updateFields });
+
+        if (result.matchedCount > 0) {
+            res.send(`${cb}({success:true, color: "${color}", bio: "${bio}"});`);
+        } else {
+            res.send(`${cb}({success:false, msg: "User not found"});`);
+        }
+    } catch (e) {
+        res.send(`${req.query.cb}({success:false, msg: "Server error"});`);
+    }
 });
 
 app.post('/update_profile_post', async (req, res) => {
