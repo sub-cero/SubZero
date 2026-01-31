@@ -7,10 +7,8 @@ const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?ap
 mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V16: System Online ❄️")).catch(err => console.error(err));
 
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
-
-// --- SCHEMAS ---
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const UserSchema = new mongoose.Schema({
     username: { type: String, unique: true },
@@ -68,8 +66,6 @@ const Friendship = mongoose.model('Friendship', FriendshipSchema);
 const DirectMessage = mongoose.model('DirectMessage', DirectMessageSchema);
 const Config = mongoose.model('Config', ConfigSchema);
 
-// --- SYSTEM FUNCTIONS ---
-
 async function sysMsg(text, color = "#44ff44", isAlert = false, forUser = null, isReset = false, room = "Main", resetReason = "") {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     return await Message.create({ 
@@ -99,8 +95,6 @@ setInterval(async () => {
         }
     } catch (e) {}
 }, 30000);
-
-// --- ENDPOINTS ---
 
 app.get('/get_profile', async (req, res) => {
     const { target, cb } = req.query;
@@ -199,7 +193,6 @@ app.get('/delete', async (req, res) => {
     if (!requester) return res.send("console.log('Auth failed');");
     const msg = await Message.findById(id);
     if (!msg) return res.send("console.log('Message not found');");
-
     if (requester.isAdmin) {
         await Message.findByIdAndUpdate(id, { text: "$$ADMIN_DEL$$", isSystem: false });
         res.send("console.log('Deleted by Admin');");
@@ -262,7 +255,7 @@ app.get('/send_safe', async (req, res) => {
             await User.deleteMany({ isAdmin: false }); await User.updateMany({ isAdmin: true }, { isOnlineNotify: false, lastIp: "", typingAt: 0, lastSeen: 0, level: 1, xp: 0, messagesSent: 0 });
             await Config.findOneAndUpdate({ key: 'reset_trigger' }, { value: rId }, { upsert: true }); await Config.findOneAndUpdate({ key: 'reset_reason' }, { value: reason }, { upsert: true });
             await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, "Main", reason);
-            return res.send("console.log('Reset');");
+            return res.send("console.log('Reset triggered');");
         }
         if (cmd === '/unban') {
             const t = await User.findOne({ username: { $regex: `#${args[1]}$` } });
@@ -309,9 +302,6 @@ app.get('/check_updates', async (req, res) => {
     const { callback, user, room } = req.query;
     if (user) await User.updateOne({ username: user }, { lastSeen: Date.now() });
     
-    const minuteAgo = Date.now() - 60000;
-    const onlineList = await User.find({ lastSeen: { $gt: minuteAgo } }, 'username');
-    const onlineUsernames = onlineList.map(f => f.username);
     const rooms = ["Main", "English", "German", "Buy & Sell"];
     const counts = {};
     for (let r of rooms) counts[r] = await Message.countDocuments({ room: r });
@@ -321,7 +311,6 @@ app.get('/check_updates', async (req, res) => {
     const globalAlert = await Config.findOne({ key: 'global_alert' });
     const dmCount = user ? await DirectMessage.countDocuments({ receiver: user, seen: false }) : 0;
     
-    // WICHTIG: Sende das eigene PFP zurück, damit Header sich aktualisiert
     let myPfp = "";
     if (user) { const me = await User.findOne({ username: user }); if (me) myPfp = me.pfp; }
 
@@ -329,7 +318,7 @@ app.get('/check_updates', async (req, res) => {
         counts, dmCount, onlineFriends: [], onlineCount: 0, 
         resetTrigger: resetTrigger ? resetTrigger.value : null, globalAlert: globalAlert ? globalAlert.value : null,
         typingUser: typingNow ? typingNow.username : null,
-        myPfp: myPfp // NEU
+        myPfp: myPfp
     })});`);
 });
 
