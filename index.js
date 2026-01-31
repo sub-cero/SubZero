@@ -434,7 +434,7 @@ app.get('/check_updates', async (req, res) => {
         counts, 
         dmCount, 
         onlineFriends, 
-        isBanned: !!ipBanned || (me && me.isBanned),
+        isBanned: !!ipBanned || (me ? me.isBanned : false),
         banTimeLeft: me ? getBanString(me.banExpires) : (ipBanned ? "PERMANENT (IP)" : null),
         resetTrigger: resetMsg ? resetMsg._id : null,
         resetReason: resetMsg ? resetMsg.resetReason : null,
@@ -447,11 +447,7 @@ app.get('/messages_jsonp', async (req, res) => {
     const { user, pass, room } = req.query;
     const check = await User.findOne({ username: user, password: pass });
     if (check && check.isBanned && !check.isAdmin) {
-        if (check.banExpires > 0 && Date.now() > check.banExpires) {
-            check.isBanned = false;
-            check.banExpires = 0;
-            await check.save();
-        } else {
+        if (check.banExpires > 0 && Date.now() < check.banExpires) {
              const timeLeft = getBanString(check.banExpires);
              return res.send(`${req.query.callback}([{isSystem: true, text: 'ACCOUNT_BANNED ('+timeLeft+')', color: '#ff0000'}]);`);
         }
