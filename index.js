@@ -53,24 +53,15 @@ const MessageSchema = new mongoose.Schema({
 });
 
 const FriendshipSchema = new mongoose.Schema({
-    requester: String, 
-    recipient: String, 
+    requester: String, recipient: String, 
     status: { type: String, enum: ['pending', 'accepted', 'blocked'], default: 'pending' }
 });
 
 const DirectMessageSchema = new mongoose.Schema({
-    sender: String,
-    receiver: String,
-    text: String,
-    time: String,
-    color: String,
-    seen: { type: Boolean, default: false }
+    sender: String, receiver: String, text: String, time: String, color: String, seen: { type: Boolean, default: false }
 });
 
-const ConfigSchema = new mongoose.Schema({
-    key: String,
-    value: String
-});
+const ConfigSchema = new mongoose.Schema({ key: String, value: String });
 
 const User = mongoose.model('User', UserSchema);
 const IPBan = mongoose.model('IPBan', BanSchema);
@@ -119,17 +110,10 @@ app.get('/get_profile', async (req, res) => {
     const found = await User.findOne({ username: target });
     if (!found) return res.send(`${cb}({success:false});`);
     const profileData = {
-        username: found.username,
-        color: found.color,
-        isAdmin: found.isAdmin,
-        status: found.status,
-        customStatus: found.customStatus,
-        bio: found.bio,
-        level: found.level,
-        xp: found.xp,
-        xpNeeded: found.level * 100,
-        messages: found.messagesSent,
-        joinedAt: new Date(found.joinedAt).toLocaleDateString(),
+        username: found.username, color: found.color, isAdmin: found.isAdmin,
+        status: found.status, customStatus: found.customStatus, bio: found.bio,
+        level: found.level, xp: found.xp, xpNeeded: found.level * 100,
+        messages: found.messagesSent, joinedAt: new Date(found.joinedAt).toLocaleDateString(),
         isOnline: found.lastSeen > Date.now() - 60000
     };
     res.send(`${cb}(${JSON.stringify(profileData)});`);
@@ -143,9 +127,7 @@ app.get('/update_profile', async (req, res) => {
         if (customStatus) me.customStatus = customStatus.substring(0, 30);
         await me.save();
         res.send("console.log('Profile updated');");
-    } else {
-        res.send("console.log('Auth failed');");
-    }
+    } else { res.send("console.log('Auth failed');"); }
 });
 
 app.get('/logout_notify', async (req, res) => {
@@ -177,46 +159,30 @@ app.get('/auth', async (req, res) => {
     }
 
     if (mode === 'register') {
-        if (onlineCount >= 150) {
-            return res.send(`${callback}({success:false, msg:'Server full (150/150). Try later!'});`);
-        }
+        if (onlineCount >= 150) return res.send(`${callback}({success:false, msg:'Server full'});`);
         const validate = (str) => /^[a-zA-Z0-9]{5,}$/.test(str);
-        if (!validate(user) || !validate(pass)) {
-            return res.send(`${callback}({success:false, msg:'Min. 5 chars, no special characters!'});`);
-        }
-        if (pass !== passConfirm) {
-            return res.send(`${callback}({success:false, msg:'Passwords do not match!'});`);
-        }
+        if (!validate(user) || !validate(pass)) return res.send(`${callback}({success:false, msg:'Invalid chars'});`);
+        if (pass !== passConfirm) return res.send(`${callback}({success:false, msg:'Mismatch'});`);
         try {
             const pureName = user.trim().toLowerCase();
             const existing = await User.findOne({ pureName });
-            if (existing) return res.send(`${callback}({success:false, msg:'Username taken'});`);
+            if (existing) return res.send(`${callback}({success:false, msg:'Taken'});`);
             const tag = Math.floor(1000 + Math.random() * 9000).toString();
             const randomColor = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
             await User.create({ username: `${user.trim()}#${tag}`, pureName, password: pass, color: randomColor, lastIp: ip, lastSeen: Date.now(), joinedAt: Date.now() });
-            return res.send(`${callback}({success:true, msg:'Created! Please login now.'});`);
-        } catch(e) { return res.send(`${callback}({success:false, msg:'Error during registration'});`); }
+            return res.send(`${callback}({success:true, msg:'Created!'});`);
+        } catch(e) { return res.send(`${callback}({success:false, msg:'Error'});`); }
     } else {
         const found = await User.findOne({ pureName: user?.trim().toLowerCase(), password: pass });
         if (!found) return res.send(`${callback}({success:false, msg:'Login failed'});`);
-
         const alreadyOnline = found.lastSeen > minuteAgo;
-        if (!alreadyOnline && onlineCount >= 150 && !found.isAdmin) {
-            return res.send(`${callback}({success:false, msg:'Server full (150/150)'});`);
-        }
-
+        if (!alreadyOnline && onlineCount >= 150 && !found.isAdmin) return res.send(`${callback}({success:false, msg:'Full'});`);
         if (found.isBanned && !found.isAdmin) {
             if (found.banExpires > 0 && Date.now() > found.banExpires) {
-                found.isBanned = false;
-                found.banExpires = 0;
-                await found.save();
-            } else {
-                const timeLeft = getBanString(found.banExpires);
-                return res.send(`${callback}({success:false, msg: 'BAN: ${timeLeft}', isBanned: true});`);
-            }
+                found.isBanned = false; found.banExpires = 0; await found.save();
+            } else { return res.send(`${callback}({success:false, msg: 'BANNED', isBanned: true});`); }
         }
-        found.lastIp = ip;
-        found.lastSeen = Date.now();
+        found.lastIp = ip; found.lastSeen = Date.now();
         if (!found.isOnlineNotify) {
             await sysMsg(found.isAdmin ? `${found.username}` : `${found.username} joined`, found.isAdmin ? "#ff0000" : "#44ff44", found.isAdmin);
             found.isOnlineNotify = true;
@@ -226,7 +192,7 @@ app.get('/auth', async (req, res) => {
     }
 });
 
-// --- UPDATED DELETE FUNCTION (USER RIGHTS + SOLD LOGIC) ---
+// --- UPDATED DELETE FUNCTION (ADMIN vs USER) ---
 app.get('/delete', async (req, res) => {
     const { id, user, pass } = req.query;
     const requester = await User.findOne({ username: user, password: pass });
@@ -236,21 +202,18 @@ app.get('/delete', async (req, res) => {
     const msg = await Message.findById(id);
     if (!msg) return res.send("console.log('Message not found');");
 
-    // Prüfen: Ist User Admin ODER gehört die Nachricht ihm?
-    if (requester.isAdmin || msg.user === requester.username) {
-        
-        // Wenn es ein Marktplatz-Post ist ($$MARKET$$), markieren wir ihn als VERKAUFT ($$SOLD$$)
-        // anstatt ihn zu löschen.
-        if (msg.text.startsWith('$$MARKET$$|')) {
-            const newText = msg.text.replace('$$MARKET$$|', '$$SOLD$$|');
-            await Message.findByIdAndUpdate(id, { text: newText });
-            res.send("console.log('Item marked as sold');");
-        } else {
-            // Normale Nachrichten werden "gelöscht" (Text ersetzt)
-            await Message.findByIdAndUpdate(id, { text: "DELETED_BY_ADMIN" }); 
-            res.send("console.log('Message deleted');");
-        }
-    } else {
+    // Berechtigung prüfen
+    if (requester.isAdmin) {
+        // Admin löscht -> Spezieller Code für ROTEN Text
+        await Message.findByIdAndUpdate(id, { text: "$$ADMIN_DEL$$" });
+        res.send("console.log('Deleted by Admin');");
+    } 
+    else if (msg.user === requester.username) {
+        // User löscht -> Spezieller Code für GRAUEN Text
+        await Message.findByIdAndUpdate(id, { text: "$$USER_DEL$$" });
+        res.send("console.log('Deleted by User');");
+    } 
+    else {
         res.send("console.log('Unauthorized');");
     }
 });
@@ -265,115 +228,68 @@ app.get('/send_safe', async (req, res) => {
     const { user, text, pass, room, replyUser, replyText } = req.query;
     const currentRoom = room || "Main";
     const sender = await User.findOne({ username: user, password: pass });
-    
     if (!sender) return res.send("console.log('Auth error');");
-
     if (sender.isBanned && !sender.isAdmin) {
         if (sender.banExpires > 0 && Date.now() > sender.banExpires) {
-            sender.isBanned = false;
-            sender.banExpires = 0;
-            await sender.save();
-        } else {
-            return res.send("console.log('Banned');");
-        }
+            sender.isBanned = false; sender.banExpires = 0; await sender.save();
+        } else { return res.send("console.log('Banned');"); }
     }
 
-    sender.messagesSent += 1;
+    sender.messagesSent++;
     sender.xp += Math.floor(Math.random() * 10) + 5;
-    const xpNeeded = sender.level * 100;
-    if (sender.xp >= xpNeeded) {
-        sender.level += 1;
-        sender.xp = 0;
+    if (sender.xp >= sender.level * 100) {
+        sender.level++; sender.xp = 0;
         await sysMsg(`${sender.username} reached Level ${sender.level}! ✨`, "#ffaa00", false, null, false, currentRoom);
     }
     await sender.save();
     await User.findOneAndUpdate({ username: user }, { typingAt: 0 });
     
     if (sender.isAdmin && text.startsWith('/')) {
-        const args = text.split(' ');
-        const cmd = args[0].toLowerCase();
-
-        if (cmd === '/help') {
-            const helpText = "Admin: /clear, /ban [ID], /ipban [ID], /unban [ID], /reset [Reason], /alert [Text], /shadow [ID]";
-            await sysMsg(helpText, "#00d4ff", false, user, false, currentRoom);
-            return res.send("console.log('Help sent');");
-        }
+        const args = text.split(' '); const cmd = args[0].toLowerCase();
+        if (cmd === '/help') { await sysMsg("Admin: /clear, /ban [ID], /ipban [ID], /unban [ID], /reset [Reason], /alert [Text], /shadow [ID]", "#00d4ff", false, user, false, currentRoom); return res.send("console.log('Help');"); }
         if (cmd === '/alert') {
-            const alertText = args.slice(1).join(' ');
-            await Config.findOneAndUpdate({ key: 'global_alert' }, { value: alertText }, { upsert: true });
+            await Config.findOneAndUpdate({ key: 'global_alert' }, { value: args.slice(1).join(' ') }, { upsert: true });
             setTimeout(async () => { await Config.deleteOne({ key: 'global_alert' }); }, 15000);
             return res.send("console.log('Alert set');");
         }
         if (cmd === '/shadow') {
-            const targetInput = args[1];
-            const target = await User.findOne({ username: { $regex: `#${targetInput}$` } });
-            if(target && !target.isAdmin) {
-                target.isShadowBanned = !target.isShadowBanned;
-                await target.save();
-            }
+            const t = await User.findOne({ username: { $regex: `#${args[1]}$` } });
+            if(t && !t.isAdmin) { t.isShadowBanned = !t.isShadowBanned; await t.save(); }
             return res.send("console.log('Shadow toggled');");
         }
-        if (cmd === '/clear') {
-            await Message.deleteMany({ room: currentRoom });
-            await sysMsg("Chat cleared by Admin", "#ffff00", false, null, false, currentRoom);
-            return res.send("console.log('Cleared');");
-        }
+        if (cmd === '/clear') { await Message.deleteMany({ room: currentRoom }); await sysMsg("Chat cleared by Admin", "#ffff00", false, null, false, currentRoom); return res.send("console.log('Cleared');"); }
         if (cmd === '/ban' || cmd === '/ipban') {
-            const targetInput = args[1];
-            const target = await User.findOne({ username: { $regex: `#${targetInput}$` } });
-            let duration = parseInt(args[2]);
-            if(target && !target.isAdmin) {
-                target.isBanned = true;
-                target.banExpires = (duration > 0) ? Date.now() + (duration * 60000) : 0;
-                if(cmd === '/ipban' && target.lastIp) await IPBan.create({ ip: target.lastIp });
-                await target.save();
-                await sysMsg(`${target.username} was banned.`, "#ffff00", false, null, false, currentRoom);
+            const t = await User.findOne({ username: { $regex: `#${args[1]}$` } });
+            if(t && !t.isAdmin) {
+                t.isBanned = true; t.banExpires = (parseInt(args[2]) > 0) ? Date.now() + (parseInt(args[2]) * 60000) : 0;
+                if(cmd === '/ipban' && t.lastIp) await IPBan.create({ ip: t.lastIp });
+                await t.save(); await sysMsg(`${t.username} was banned.`, "#ffff00", false, null, false, currentRoom);
             }
             return res.send("console.log('Banned');");
         }
         if (cmd === '/reset') {
-            const reason = args.slice(1).join(' ') || "System Update";
-            const resetId = Date.now().toString();
-            await Message.deleteMany({});
-            await DirectMessage.deleteMany({});
-            await Friendship.deleteMany({});
-            await User.deleteMany({ isAdmin: false });
-            await User.updateMany({ isAdmin: true }, { isOnlineNotify: false, lastIp: "", typingAt: 0, lastSeen: 0, level: 1, xp: 0, messagesSent: 0 });
-            await Config.findOneAndUpdate({ key: 'reset_trigger' }, { value: resetId }, { upsert: true });
+            const rId = Date.now().toString(); const reason = args.slice(1).join(' ') || "System Update";
+            await Message.deleteMany({}); await DirectMessage.deleteMany({}); await Friendship.deleteMany({});
+            await User.deleteMany({ isAdmin: false }); await User.updateMany({ isAdmin: true }, { isOnlineNotify: false, lastIp: "", typingAt: 0, lastSeen: 0, level: 1, xp: 0, messagesSent: 0 });
+            await Config.findOneAndUpdate({ key: 'reset_trigger' }, { value: rId }, { upsert: true });
             await Config.findOneAndUpdate({ key: 'reset_reason' }, { value: reason }, { upsert: true });
             await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, "Main", reason);
             return res.send("console.log('Reset triggered');");
         }
         if (cmd === '/unban') {
-            const targetInput = args[1];
-            const target = await User.findOne({ username: { $regex: `#${targetInput}$` } });
-            if(target) {
-                target.isBanned = false;
-                target.banExpires = 0;
-                target.isShadowBanned = false;
-                await target.save();
-                if(target.lastIp) await IPBan.deleteMany({ ip: target.lastIp });
-                await sysMsg(`${target.username} was unbanned.`, "#44ff44", false, null, false, currentRoom);
-            }
+            const t = await User.findOne({ username: { $regex: `#${args[1]}$` } });
+            if(t) { t.isBanned = false; t.banExpires = 0; t.isShadowBanned = false; await t.save(); if(t.lastIp) await IPBan.deleteMany({ ip: t.lastIp }); await sysMsg(`${t.username} was unbanned.`, "#44ff44", false, null, false, currentRoom); }
             return res.send("console.log('Unbanned');");
         }
     }
 
-    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    
-    // Reply Objekt verarbeiten
     let replyObj = null;
-    if (replyUser && replyText) {
-        replyObj = {
-            user: replyUser,
-            text: replyText.substring(0, 50) + (replyText.length > 50 ? "..." : "")
-        };
-    }
+    if (replyUser && replyText) { replyObj = { user: replyUser, text: replyText.substring(0, 50) + "..." }; }
 
     await Message.create({ 
         user, text, color: sender.color, status: sender.status, 
-        time, room: currentRoom, forUser: sender.isShadowBanned ? user : null,
-        replyTo: replyObj 
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 
+        room: currentRoom, forUser: sender.isShadowBanned ? user : null, replyTo: replyObj 
     });
     res.send("console.log('Sent');");
 });
@@ -390,8 +306,8 @@ app.get('/friend_request', async (req, res) => {
     res.send("console.log('Friend req processed');");
 });
 
-app.get('/get_social', async (req, res) => {
-    const { user, pass, cb } = req.query;
+app.get('/get_social', async (req, res) => { 
+    const { user, pass, cb } = req.query; 
     const me = await User.findOne({ username: user, password: pass });
     if (!me) return res.send("");
     const friends = await Friendship.find({ $or: [{ requester: me.username }, { recipient: me.username }], status: 'accepted' });
@@ -411,7 +327,7 @@ app.get('/handle_request', async (req, res) => {
     res.send("loadSocial();");
 });
 
-app.get('/send_dm', async (req, res) => {
+app.get('/send_dm', async (req, res) => { 
     const { user, pass, target, text } = req.query;
     const me = await User.findOne({ username: user, password: pass });
     if (me && !me.isBanned) {
@@ -421,7 +337,7 @@ app.get('/send_dm', async (req, res) => {
     res.send("loadMsgs();");
 });
 
-app.get('/get_dms', async (req, res) => {
+app.get('/get_dms', async (req, res) => { 
     const { user, pass, target, cb } = req.query;
     const me = await User.findOne({ username: user, password: pass });
     if (!me) return res.send("");
@@ -442,7 +358,7 @@ app.get('/check_updates', async (req, res) => {
         if (me.isBanned && !me.isAdmin) isBanned = true;
     }
 
-    // UPDATE: Raum-Namen an Frontend angepasst ("English", "German", "Buy & Sell")
+    // UPDATE: Raum-Namen an Frontend angepasst
     const rooms = ["Main", "English", "German", "Buy & Sell"];
     const counts = {};
     for (let r of rooms) counts[r] = await Message.countDocuments({ room: r });
@@ -458,18 +374,11 @@ app.get('/check_updates', async (req, res) => {
     const dmCount = user ? await DirectMessage.countDocuments({ receiver: user, seen: false }) : 0;
     
     res.send(`${callback}(${JSON.stringify({ 
-        counts, 
-        dmCount, 
-        onlineFriends: onlineUsernames, 
-        onlineCount: onlineUsernames.length, 
-        isBanned: isBanned, 
-        banTimeLeft: me ? getBanString(me.banExpires) : (ipBanned ? "PERMANENT (IP)" : null),
-        resetTrigger: resetTrigger ? resetTrigger.value : null, 
-        resetReason: resetReason ? resetReason.value : null, 
-        globalAlert: globalAlert ? globalAlert.value : null, 
-        typingUser: typingNow ? typingNow.username : null,
-        myLevel: me ? me.level : 1,
-        myXp: me ? me.xp : 0
+        counts, dmCount, onlineFriends: onlineUsernames, onlineCount: onlineUsernames.length, 
+        isBanned: isBanned, banTimeLeft: me ? getBanString(me.banExpires) : (ipBanned ? "PERMANENT (IP)" : null),
+        resetTrigger: resetTrigger ? resetTrigger.value : null, resetReason: resetReason ? resetReason.value : null,
+        globalAlert: globalAlert ? globalAlert.value : null, typingUser: typingNow ? typingNow.username : null,
+        myLevel: me ? me.level : 1, myXp: me ? me.xp : 0
     })});`);
 });
 
@@ -478,9 +387,7 @@ app.get('/messages_jsonp', async (req, res) => {
     const requester = await User.findOne({ username: user, password: pass });
     if (requester && requester.isBanned && !requester.isAdmin) {
         if (requester.banExpires > 0 && Date.now() > requester.banExpires) {
-            requester.isBanned = false;
-            requester.banExpires = 0;
-            await requester.save();
+            requester.isBanned = false; requester.banExpires = 0; await requester.save();
         } else {
             return res.send(`${callback}([{isSystem: true, text: 'BANNED', color: '#ff0000'}]);`);
         }
