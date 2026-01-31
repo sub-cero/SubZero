@@ -29,8 +29,20 @@
         .online-indicator { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 15px; font-family: 'Inter', sans-serif; font-weight: bold; color: var(--sys-green); }
         .dot { width: 10px; height: 10px; background-color: var(--sys-green); border-radius: 50%; box-shadow: 0 0 10px var(--sys-green); animation: pulse-green 2s infinite; }
         @keyframes pulse-green { 0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(68, 255, 68, 0.7); } 70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(68, 255, 68, 0); } 100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(68, 255, 68, 0); } }
+        
+        /* ADMIN ANIMATION */
+        .leader-text { 
+            font-family: 'Inter', sans-serif; 
+            font-weight: 900; 
+            text-transform: uppercase; 
+            letter-spacing: 2px; 
+            animation: leader-pulse 1.5s infinite alternate; 
+        }
+        @keyframes leader-pulse { 
+            from { text-shadow: 0 0 5px currentColor; opacity: 0.8; } 
+            to { text-shadow: 0 0 20px currentColor, 0 0 5px white; opacity: 1; transform: scale(1.05); } 
+        }
 
-        /* --- HEADER & NAVIGATION --- */
         header {
             flex: 0 0 auto; 
             display: flex; align-items: center; justify-content: space-between;
@@ -45,7 +57,17 @@
             white-space: nowrap;
         }
 
-        /* --- CHAT AREA --- */
+        /* BENACHRICHTIGUNGS-PUNKT STYLE */
+        .room-btn { position: relative; padding: 10px; cursor: pointer; color: #666; font-weight: bold; transition: 0.3s; }
+        .room-btn.active { color: var(--ice); }
+        .room-dot { 
+            position: absolute; top: 5px; right: 0px; 
+            width: 8px; height: 8px; 
+            background: var(--sys-green); border-radius: 50%; 
+            box-shadow: 0 0 5px var(--sys-green);
+            display: none; /* Standardmäßig aus */
+        }
+
         #chat {
             flex: 1 1 auto; 
             overflow-y: auto; 
@@ -58,7 +80,6 @@
             padding-bottom: 120px;
         }
 
-        /* --- INPUT AREA --- */
         #bottom-area {
             flex: 0 0 auto;
             width: 100%;
@@ -71,105 +92,182 @@
         }
 
         #input-bar { display: flex; gap: 10px; width: 100%; }
-
-        /* --- MESSAGE STYLES --- */
-        .chat-row { display: flex; align-items: flex-end; margin-bottom: 10px; width: 100%; }
+        
+        .chat-row {
+            display: flex;
+            align-items: flex-end;
+            margin-bottom: 10px;
+            width: 100%;
+        }
         .chat-row.me { justify-content: flex-end; }
         .chat-row.other { justify-content: flex-start; }
 
         .chat-avatar {
-            width: 36px; height: 36px; border-radius: 50%; margin-right: 10px; object-fit: cover;
-            border: 1px solid #333; flex-shrink: 0; cursor: pointer; background: #222; display: flex; align-items: center; justify-content: center;
+            width: 36px; height: 36px;
+            border-radius: 50%;
+            margin-right: 10px;
+            object-fit: cover;
+            border: 1px solid #333;
+            flex-shrink: 0;
+            cursor: pointer;
+            background: #222;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .msg {
-            max-width: 88%; width: auto; word-wrap: break-word; margin-bottom: 10px; padding: 10px 15px;
-            background: rgba(255, 255, 255, 0.05); border-radius: 12px; color: #eee; position: relative; flex-shrink: 0;
+            max-width: 88%;
+            width: auto;
+            word-wrap: break-word;
+            margin-bottom: 10px;
+            padding: 10px 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            color: #eee;
+            position: relative;
+            flex-shrink: 0;
         }
         .msg.me { align-self: flex-end; background: rgba(0, 100, 255, 0.1); border-bottom-right-radius: 2px; }
         .msg:not(.me) { align-self: flex-start; border-bottom-left-radius: 2px; }
 
-        /* --- TYPING INDICATOR --- */
-        #typing-indicator {
-            position: fixed; bottom: 80px; left: 20px; color: var(--ice); font-size: 11px; font-style: italic;
-            display: none; z-index: 1900; text-shadow: 0 0 5px var(--ice);
+        .header-avatar {
+            width: 34px; height: 34px;
+            border-radius: 50%;
+            object-fit: cover;
+            cursor: pointer;
+            border: 2px solid var(--ice);
+            margin-right: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #222;
         }
 
-        /* --- OVERLAYS --- */
-        #ban-overlay {
-            position: fixed; inset: 0; background: #2a0505; z-index: 9999; display: none;
-            align-items: center; justify-content: center; flex-direction: column; text-align: center; color: #ff4444;
+        .profile-pic-large {
+            width: 100px; height: 100px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 3px solid var(--ice);
+            margin-bottom: 15px;
+            background: #222;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 15px auto;
         }
         
-        #unban-overlay {
-            position: fixed; inset: 0; background: #052a05; z-index: 9999; display: none;
-            align-items: center; justify-content: center; flex-direction: column; text-align: center; color: #44ff44;
+        .header-icon {
+            font-size: 28px;
+            color: #fff;
+            cursor: pointer;
+            padding: 5px;
         }
 
-        .profile-pic-large { width: 100px; height: 100px; border-radius: 50%; object-fit: cover; border: 3px solid var(--ice); margin-bottom: 15px; cursor: pointer; background: #222; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px auto; }
-        .header-avatar { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; cursor: pointer; border: 2px solid var(--ice); margin-right: 8px; display: flex; align-items: center; justify-content: center; background: #222; }
-        .header-icon { font-size: 28px; color: #fff; cursor: pointer; padding: 5px; }
-
-        .bio-input { width: 100%; background: #111; border: 1px solid #333; color: #eee; padding: 10px; border-radius: 8px; resize: none; height: 80px; margin-top: 10px; font-family: 'Inter', sans-serif; font-size: 13px; outline: none; }
+        .bio-input {
+            width: 100%;
+            background: #111;
+            border: 1px solid #333;
+            color: #eee;
+            padding: 10px;
+            border-radius: 8px;
+            resize: none;
+            height: 80px;
+            margin-top: 10px;
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            outline: none;
+        }
         .bio-input:focus { border-color: var(--ice); }
 
         #sell-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 6000; display: none; align-items: center; justify-content: center; backdrop-filter: blur(10px); }
         
-        #open-sell-btn { display: none; background: linear-gradient(135deg, var(--sys-yellow), #ffaa00); color: #000; font-weight: 900; font-size: 24px; border: none; width: 45px; height: 45px; border-radius: 50%; margin-right: 5px; cursor: pointer; box-shadow: 0 0 15px rgba(255, 200, 0, 0.3); transition: 0.2s; }
+        #open-sell-btn { 
+            display: none; background: linear-gradient(135deg, var(--sys-yellow), #ffaa00); color: #000; 
+            font-weight: 900; font-size: 24px; border: none; width: 45px; height: 45px; border-radius: 50%; margin-right: 5px; cursor: pointer; box-shadow: 0 0 15px rgba(255, 200, 0, 0.3); transition: 0.2s; 
+        }
         #open-sell-btn:active { transform: scale(0.95); }
 
         .type-btn { flex: 1; padding: 12px; border-radius: 10px; font-weight: bold; cursor: pointer; border: 1px solid #333; background: #111; color: #666; transition: 0.3s; font-family: 'Inter', sans-serif; }
         .type-btn.active-wts { background: rgba(68, 255, 68, 0.1); color: var(--sys-green); border: 1px solid var(--sys-green); box-shadow: 0 0 15px rgba(68, 255, 68, 0.2); }
         .type-btn.active-wtb { background: rgba(255, 68, 68, 0.1); color: var(--sys-red); border: 1px solid var(--sys-red); box-shadow: 0 0 15px rgba(255, 68, 68, 0.2); }
 
-        .product-card { background: #0d1117; border: 1px solid #21262d; border-radius: 16px; padding: 16px; margin: 15px 0; position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 95%; min-width: 280px; flex-shrink: 0; display: block; clear: both; transition: all 0.3s ease; overflow: hidden; }
+        .product-card {
+            background: #0d1117;
+            border: 1px solid #21262d;
+            border-radius: 16px;
+            padding: 16px;
+            margin: 15px 0;
+            position: relative;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            width: 95%; 
+            min-width: 280px; 
+            flex-shrink: 0; 
+            display: block; 
+            clear: both;
+            transition: all 0.3s ease;
+            overflow: hidden;
+        }
+
         .card-tag { font-size: 10px; font-weight: 800; padding: 4px 8px; border-radius: 6px; position: absolute; top: 12px; left: 12px; text-transform: uppercase; letter-spacing: 1px; background: rgba(0,0,0,0.5); }
-        .card-del-btn { position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; background: rgba(20, 20, 20, 0.9); color: #ff4444; border: 1px solid #333; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 100; transition: 0.2s; font-weight: bold; font-size: 18px; }
+
+        .card-del-btn {
+            position: absolute; top: 8px; right: 8px; 
+            width: 32px; height: 32px;
+            background: rgba(20, 20, 20, 0.9);
+            color: #ff4444; border: 1px solid #333; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; z-index: 100; 
+            transition: 0.2s; font-weight: bold; font-size: 18px;
+        }
         .card-del-btn:hover { background: #ff4444; color: white; transform: scale(1.1); }
+        
         .del-x { float: right; margin-left: 10px; color: #ff4444; cursor: pointer; font-weight: bold; font-size: 14px; }
 
         .field-label { display: block; font-size: 9px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-top: 15px; font-weight: bold; }
         .card-title { font-size: 16px; font-weight: bold; color: #fff; display: block; margin-top: 2px; word-wrap: break-word; }
         .card-price-tag { font-family: 'Inter', monospace; font-size: 24px; font-weight: 900; letter-spacing: -1px; display: block; margin-top: 2px; }
         .card-desc { font-size: 13px; color: #aaa; margin-bottom: 15px; display: block; border-top: 1px solid #333; padding-top: 5px; line-height: 1.4; word-wrap: break-word; }
+        
         .seller-info { display: flex; align-items: center; gap: 5px; margin-top: 35px; font-size: 11px; color: #888; }
-        .buy-btn { width: 100%; padding: 12px; margin-top: 10px; background: rgba(255,255,255,0.05); border: 1px solid #333; color: #fff; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; }
+        
+        .buy-btn {
+            width: 100%; padding: 12px; margin-top: 10px;
+            background: rgba(255,255,255,0.05); border: 1px solid #333; 
+            color: #fff; border-radius: 8px; font-weight: bold; cursor: pointer;
+            transition: 0.2s; text-transform: uppercase; font-size: 12px; letter-spacing: 1px;
+        }
+        .buy-btn:hover { background: var(--ice); color: #000; border-color: var(--ice); }
 
-        #toast { visibility: hidden; min-width: 200px; background-color: var(--sys-green); color: #000; text-align: center; border-radius: 50px; padding: 12px; position: fixed; z-index: 9999; left: 50%; top: 20px; transform: translateX(-50%); font-weight: bold; box-shadow: 0 0 20px rgba(68, 255, 68, 0.4); opacity: 0; transition: opacity 0.5s, top 0.5s; }
+        #toast {
+            visibility: hidden; min-width: 200px; background-color: var(--sys-green); color: #000; text-align: center; border-radius: 50px; padding: 12px; position: fixed; z-index: 9999; left: 50%; top: 20px; transform: translateX(-50%); font-weight: bold; box-shadow: 0 0 20px rgba(68, 255, 68, 0.4); opacity: 0; transition: opacity 0.5s, top 0.5s;
+        }
         #toast.show { visibility: visible; opacity: 1; top: 60px; }
 
         .hidden { display: none !important; }
         #msg-in { flex: 1; padding: 12px 15px; border-radius: 25px; border: 1px solid #333; background: #111; color: white; outline: none; font-size: 16px; }
         .send-btn { padding: 0 20px; border-radius: 25px; border: none; background: var(--ice); color: black; font-weight: 900; cursor: pointer; }
         
+        /* COLOR PICKER STYLE */
         input[type="color"] { -webkit-appearance: none; border: none; width: 100%; height: 40px; border-radius: 8px; cursor: pointer; background: none; }
         input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
         input[type="color"]::-webkit-color-swatch { border: 1px solid #333; border-radius: 8px; }
 
-        /* SYS MSG COLOR FIX */
         .sys-small { 
             align-self: center !important; 
             font-size: 11px !important; 
-            font-weight: 900 !important; 
-            margin: 12px 0 !important; 
+            font-weight: 800 !important; 
+            margin: 10px 0 !important; 
             text-transform: uppercase !important; 
             letter-spacing: 1.5px !important; 
             text-align: center !important;
             display: block !important;
             width: 100% !important;
         }
-        
-        .leader-text { 
-            font-family: 'Inter', sans-serif; 
-            font-weight: 900; 
-            text-transform: uppercase; 
-            letter-spacing: 2px; 
-            animation: leader-pulse 1.5s infinite alternate; 
-        }
-        @keyframes leader-pulse { 
-            from { text-shadow: 0 0 5px currentColor; opacity: 0.8; } 
-            to { text-shadow: 0 0 20px currentColor, 0 0 5px white; opacity: 1; transform: scale(1.05); } 
-        }
+
+        /* BAN UI */
+        #ban-overlay { position: fixed; inset: 0; background: #2a0505; z-index: 9999; display: none; align-items: center; justify-content: center; flex-direction: column; text-align: center; color: #ff4444; }
+        #unban-overlay { position: fixed; inset: 0; background: #052a05; z-index: 9999; display: none; align-items: center; justify-content: center; flex-direction: column; text-align: center; color: #44ff44; }
 
     </style>
 </head>
@@ -180,6 +278,19 @@
     <div id="toast">Settings Saved!</div>
 
     <div id="typing-indicator">... is typing</div>
+
+    <div id="ban-overlay">
+        <span class="material-icons" style="font-size: 80px; margin-bottom:20px;">gavel</span>
+        <h1 style="margin:0; font-size:32px; letter-spacing:5px;">BANNED</h1>
+        <p style="color:#ff8888; margin-top:10px;">Your access has been revoked.</p>
+        <div id="ban-timer" style="margin-top:20px; padding:10px 20px; border:1px solid #f00; border-radius:10px;">Checking...</div>
+    </div>
+    
+    <div id="unban-overlay">
+        <span class="material-icons" style="font-size: 80px; margin-bottom:20px;">check_circle</span>
+        <h1 style="margin:0; font-size:32px; letter-spacing:5px;">UNBANNED</h1>
+        <p style="color:#88ff88; margin-top:10px;">Welcome back.</p>
+    </div>
 
     <div id="sell-modal">
         <div class="auth-card" style="border: 1px solid #333; width: 90%; max-width: 380px; background:#0a0c10; padding:25px;">
@@ -234,19 +345,6 @@
                 <button onclick="closeProfile()" style="flex:1; padding:10px; border-radius:10px; border:1px solid #444; background:transparent; color:#fff;">Close</button>
             </div>
         </div>
-    </div>
-
-    <div id="ban-overlay">
-        <span class="material-icons" style="font-size: 80px; margin-bottom:20px;">gavel</span>
-        <h1 style="margin:0; font-size:32px; letter-spacing:5px;">BANNED</h1>
-        <p style="color:#ff8888; margin-top:10px;">Your access has been revoked.</p>
-        <div id="ban-timer" style="margin-top:20px; padding:10px 20px; border:1px solid #f00; border-radius:10px;">Checking...</div>
-    </div>
-    
-    <div id="unban-overlay">
-        <span class="material-icons" style="font-size: 80px; margin-bottom:20px;">check_circle</span>
-        <h1 style="margin:0; font-size:32px; letter-spacing:5px;">UNBANNED</h1>
-        <p style="color:#88ff88; margin-top:10px;">Welcome back.</p>
     </div>
 
     <div id="auth-screen">
@@ -467,11 +565,7 @@
         function setListingType(t) { listingType = t; document.getElementById('type-wts').className = (t==='WTS'?'type-btn active-wts':'type-btn'); document.getElementById('type-wtb').className = (t==='WTB'?'type-btn active-wtb':'type-btn'); }
         function toggleTheme() { currentThemeIdx = (currentThemeIdx + 1) % themes.length; document.body.className = themes[currentThemeIdx]; localStorage.setItem('sz_theme_idx', currentThemeIdx); }
         
-        function sendTyping() { 
-            if(!session) return; 
-            request(`${API}/typing?user=${encodeURIComponent(session.user)}&room=${encodeURIComponent(currentRoom)}`); 
-        }
-
+        function sendTyping() { if(!session) return; request(`${API}/typing?user=${encodeURIComponent(session.user)}&room=${encodeURIComponent(currentRoom)}`); }
         function triggerGlobalAlert() { const msg = prompt("Global Alert:"); if(msg) request(`${API}/send_safe?user=${encodeURIComponent(session.user)}&pass=${encodeURIComponent(session.pass)}&text=${encodeURIComponent('/alert ' + msg)}`); }
         
         function checkNameAvailability() {
@@ -516,6 +610,7 @@
             document.getElementById('active-dm-tag').classList.add('hidden'); 
             document.querySelectorAll('.room-btn').forEach(b => b.classList.remove('active')); 
             el.classList.add('active'); 
+            document.getElementById('dot-'+n.replace(/\s+/g, '-')).style.display='none'; 
             document.getElementById('open-sell-btn').style.display = (n==='Buy & Sell'?'block':'none'); 
             document.getElementById('msg-in').placeholder=(n==='Buy & Sell'?"List item (+)":"Write message..."); 
             loadMsgs(); 
@@ -577,6 +672,7 @@
                     ${!isMe?av:''}
                     <div class="msg ${isMe?'me':''}" style="border-${isMe?'right':'left'}-color:${m.color}">
                         ${!isDel && (session.isAdmin || isMe) ? `<span class="del-x" onclick="deleteMsg('${m._id}')">×</span>` : ''}
+                        ${!isMe ? `<span class="material-icons reply-btn" onclick="prepareReply('${m.user}')" style="position:absolute; right:-25px; top:50%; transform:translateY(-50%); color:#666; cursor:pointer; font-size:16px;">reply</span>` : ''}
                         <div style="font-size:9px; opacity:0.6">${m.time}</div>
                         <b style="color:${m.color}; cursor:pointer" onclick="openProfile('${m.user}')">${m.user}</b><br>
                         <span>${c}</span>
@@ -586,7 +682,37 @@
             chat.scrollTop = chat.scrollHeight;
         }
 
-        function send() { const t = document.getElementById('msg-in').value.trim(); if(!t) return; const m = replyData ? `@${replyData} ${t}` : t; if(replyData) cancelReply(); request(`${API}/send_safe?user=${encodeURIComponent(session.user)}&pass=${encodeURIComponent(session.pass)}&text=${encodeURIComponent(m)}&room=${encodeURIComponent(currentRoom)}`); document.getElementById('msg-in').value=""; setTimeout(loadMsgs,300); }
+        function send() { 
+            const t = document.getElementById('msg-in').value.trim(); 
+            if(!t) return; 
+            
+            // ADMIN HELP COMMAND (LOCAL)
+            if (t.toLowerCase() === '/help' && session.isAdmin) {
+                const helpMsg = `<div style="text-align:left; background:rgba(0,0,0,0.5); padding:10px; border:1px solid var(--ice); border-radius:10px; margin:10px 0;">
+                    <h3 style="margin-top:0; color:var(--ice);">ADMIN COMMANDS</h3>
+                    <div style="color:#ddd; font-size:12px; line-height:1.6;">
+                        <b style="color:white;">/alert [msg]</b> - Global Popup Alert<br>
+                        <b style="color:white;">/ban [name] [min]</b> - Ban User (opt: time)<br>
+                        <b style="color:white;">/unban [name]</b> - Unban User<br>
+                        <b style="color:white;">/clear</b> - Clear Room Chat<br>
+                        <b style="color:white;">/shadow [name]</b> - Shadowban User<br>
+                        <b style="color:white;">/reset [reason]</b> - Wipe Database
+                    </div>
+                </div>`;
+                const chat = document.getElementById('chat');
+                chat.innerHTML += helpMsg;
+                chat.scrollTop = chat.scrollHeight;
+                document.getElementById('msg-in').value = "";
+                return;
+            }
+
+            const m = replyData ? `@${replyData} ${t}` : t; 
+            if(replyData) cancelReply(); 
+            request(`${API}/send_safe?user=${encodeURIComponent(session.user)}&pass=${encodeURIComponent(session.pass)}&text=${encodeURIComponent(m)}&room=${encodeURIComponent(currentRoom)}`); 
+            document.getElementById('msg-in').value=""; 
+            setTimeout(loadMsgs,300); 
+        }
+        
         function loadMsgs() { request(`${API}/messages_jsonp?room=${encodeURIComponent(currentRoom)}&callback=displayMessages`); }
         
         function startApp() { 
@@ -631,6 +757,15 @@
                 localStorage.setItem(storageKey, JSON.stringify(session));
                 updateHeaderColor(d.myColor);
             }
+
+            // NOTIFICATION DOTS
+            for(let r in d.counts) { 
+                if(r !== currentRoom && lastMsgCounts[r] !== undefined && d.counts[r] > lastMsgCounts[r]) { 
+                    const dot = document.getElementById('dot-'+r.replace(/\s+/g, '-'));
+                    if(dot) dot.style.display='block'; 
+                } 
+                lastMsgCounts[r] = d.counts[r]; 
+            }
         }
 
         function logout() { 
@@ -640,6 +775,7 @@
         }
 
         document.getElementById('msg-in').onkeypress = (e) => { if(e.key === "Enter") send(); };
+        if(!session) setInterval(() => { if(localStorage.getItem(banKey)==='true' || !session) request(`${API}/check_updates?user=&room=Main&callback=updateBadges`); }, 1500);
     </script>
 </body>
 </html>
