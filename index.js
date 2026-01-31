@@ -175,7 +175,7 @@ app.get('/get_profile', async (req, res) => {
     } catch (e) { res.send(`${req.query.cb}({success:false});`); }
 });
 
-// 3. PROFIL UPDATES
+// 3. PROFIL UPDATES (Safe via GET & POST für Bilder)
 app.get('/update_profile_safe', async (req, res) => {
     try {
         const { user, bio, color, cb } = req.query;
@@ -204,9 +204,10 @@ app.get('/send_safe', async (req, res) => {
         const currentRoom = room || "Main";
         const sender = await User.findOne({ username: user, password: pass });
         
-        if (!sender) return res.send("0"); 
-        if (sender.isBanned && !sender.isAdmin) return res.send("0"); 
+        if (!sender) return res.send("0"); // Auth fail
+        if (sender.isBanned && !sender.isAdmin) return res.send("0"); // Ban fail
 
+        // XP System
         sender.messagesSent++;
         sender.xp += 10;
         if (sender.xp >= sender.level * 100) {
@@ -214,7 +215,7 @@ app.get('/send_safe', async (req, res) => {
             await sysMsg(`${sender.username} reached Level ${sender.level}! ✨`, "#ffff00", currentRoom);
         }
         await sender.save();
-        await User.findOneAndUpdate({ username: user }, { typingAt: 0 });
+        await User.findOneAndUpdate({ username: user }, { typingAt: 0 }); // Typing stop
 
         // --- ADMIN COMMANDS ---
         if (sender.isAdmin && text.startsWith('/')) {
@@ -265,6 +266,7 @@ app.get('/send_safe', async (req, res) => {
             }
         }
 
+        // Normale Nachricht (inkl. $$MARKET$$)
         await Message.create({ 
             user, text, 
             color: sender.color, 
@@ -300,13 +302,18 @@ app.get('/check_updates', async (req, res) => {
     const { callback, user, room } = req.query;
     if (user) await User.updateOne({ username: user }, { lastSeen: Date.now() });
     
+    // Room Dots (Nachrichten zählen)
     const rooms = ["Main", "English", "German", "Buy & Sell"];
     const counts = {};
     for (let r of rooms) counts[r] = await Message.countDocuments({ room: r });
     
+    // Typing
     const typingNow = await User.findOne({ typingAt: { $gt: Date.now() - 3000 }, typingRoom: room, username: { $ne: user } });
+    
+    // Online Counter
     const onlineCount = await User.countDocuments({ lastSeen: { $gt: Date.now() - 60000 } });
     
+    // User Status & Configs
     let me = null;
     let globalAlert = null;
     let resetTrigger = null;
