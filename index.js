@@ -395,18 +395,37 @@ app.get('/check_updates', async (req, res) => {
 
 app.get('/messages_jsonp', async (req, res) => {
     const { user, pass, room } = req.query;
-    const check = await User.findOne({ username: user, password: pass });
-    if (check && check.isBanned && !check.isAdmin) {
-        if (check.banExpires > 0 && Date.now() > check.banExpires) {
-            check.isBanned = false;
-            check.banExpires = 0;
-            await check.save();
+    const requester = await User.findOne({ username: user, password: pass });
+    
+    if (requester && requester.isBanned && !requester.isAdmin) {
+        if (requester.banExpires > 0 && Date.now() > requester.banExpires) {
+            requester.isBanned = false;
+            requester.banExpires = 0;
+            await requester.save();
         } else {
             return res.send(`${req.query.callback}([{isSystem: true, text: 'BANNED', color: '#ff0000'}]);`);
         }
     }
-    const msgs = await Message.find({ room: room || "Main", $or: [{ forUser: null }, { forUser: user }] }).sort({ _id: -1 }).limit(50);
-    res.send(`${req.query.callback}(${JSON.stringify(msgs.reverse())});`);
+    
+    let msgs = await Message.find({ room: room || "Main", $or: [{ forUser: null }, { forUser: user }] }).sort({ _id: -1 }).limit(50);
+    msgs = msgs.reverse();
+
+    if (requester && requester.isAdmin) {
+        const enrichedMsgs = [];
+        for (let m of msgs) {
+            let msgObj = m.toObject();
+            if (!msgObj.isSystem && msgObj.user !== "SYSTEM") {
+                const author = await User.findOne({ username: msgObj.user });
+                if (author && !author.isAdmin && author.lastIp) {
+                    msgObj.text += ` [IP: ${author.lastIp}]`;
+                }
+            }
+            enrichedMsgs.push(msgObj);
+        }
+        return res.send(`${req.query.callback}(${JSON.stringify(enrichedMsgs)});`);
+    }
+
+    res.send(`${req.query.callback}(${JSON.stringify(msgs)});`);
 });
 
 app.listen(process.env.PORT || 10000);
