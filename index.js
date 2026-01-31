@@ -10,6 +10,8 @@ app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// --- SCHEMAS ---
+
 const UserSchema = new mongoose.Schema({
     username: { type: String, unique: true },
     pureName: { type: String, unique: true },
@@ -18,7 +20,6 @@ const UserSchema = new mongoose.Schema({
     isAdmin: { type: Boolean, default: false },
     isBanned: { type: Boolean, default: false },
     banExpires: { type: Number, default: 0 },
-    isShadowBanned: { type: Boolean, default: false },
     lastIp: String,
     status: { type: String, default: "User" },
     customStatus: { type: String, default: "Newcomer" },
@@ -45,12 +46,7 @@ const MessageSchema = new mongoose.Schema({
     isReset: { type: Boolean, default: false },
     resetReason: { type: String, default: "" },
     forUser: { type: String, default: null },
-    replyTo: { user: String, text: String }
-});
-
-const FriendshipSchema = new mongoose.Schema({
-    requester: String, recipient: String, 
-    status: { type: String, enum: ['pending', 'accepted', 'blocked'], default: 'pending' }
+    userIp: String 
 });
 
 const DirectMessageSchema = new mongoose.Schema({
@@ -62,16 +58,17 @@ const ConfigSchema = new mongoose.Schema({ key: String, value: String });
 const User = mongoose.model('User', UserSchema);
 const IPBan = mongoose.model('IPBan', BanSchema);
 const Message = mongoose.model('Message', MessageSchema);
-const Friendship = mongoose.model('Friendship', FriendshipSchema);
 const DirectMessage = mongoose.model('DirectMessage', DirectMessageSchema);
 const Config = mongoose.model('Config', ConfigSchema);
 
-async function sysMsg(text, color = "#44ff44", isAlert = false, forUser = null, isReset = false, room = "Main", resetReason = "") {
+// --- SYSTEM FUNCTIONS ---
+
+async function sysMsg(text, color = "#44ff44", room = "Main") {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     try {
         return await Message.create({ 
             user: "SYSTEM", text, color, status: "SYS", time, 
-            isSystem: true, isAlert, forUser, isReset, room, resetReason 
+            isSystem: true, room: room || "Main"
         });
     } catch (e) {}
 }
@@ -81,29 +78,28 @@ setInterval(async () => {
         const minuteAgo = Date.now() - 60000;
         const lostUsers = await User.find({ lastSeen: { $lt: minuteAgo }, isOnlineNotify: true });
         for (let u of lostUsers) {
-            // ECHTZEIT LEAVE: ROT (#ff4444)
-            await sysMsg(`${u.username} left the room.`, "#ff4444", false, null, false, "Main");
+            await sysMsg(`${u.username} left the room.`, "#ff4444", "Main");
             u.isOnlineNotify = false;
             await u.save();
         }
     } catch (e) {}
 }, 15000);
 
+// --- ENDPOINTS ---
+
 app.get('/get_profile', async (req, res) => {
     try {
         const { target, cb } = req.query;
         const found = await User.findOne({ username: target });
         if (!found) return res.send(`${cb}({success:false});`);
-        const profileData = {
-            username: found.username, 
-            color: found.color || "#ffffff",
-            isAdmin: found.isAdmin,
-            status: found.status, customStatus: found.customStatus, bio: found.bio,
+        res.send(`${cb}(${JSON.stringify({
+            username: found.username, color: found.color || "#ffffff",
+            isAdmin: found.isAdmin, status: found.status, customStatus: found.customStatus, bio: found.bio,
             level: found.level, xp: found.xp, xpNeeded: found.level * 100,
             messages: found.messagesSent, joinedAt: new Date(found.joinedAt).toLocaleDateString(),
-            isOnline: found.lastSeen > Date.now() - 60000
-        };
-        res.send(`${cb}(${JSON.stringify(profileData)});`);
+            isOnline: found.lastSeen > Date.now() - 60000,
+            pfp: found.pfp || ""
+        })});`);
     } catch (e) { res.send(`${req.query.cb}({success:false});`); }
 });
 
@@ -113,269 +109,114 @@ app.get('/update_profile_safe', async (req, res) => {
         const updateFields = {};
         if (bio !== undefined) updateFields.bio = bio.substring(0, 150);
         if (color !== undefined) updateFields.color = color;
-
         const result = await User.updateOne({ username: user }, { $set: updateFields });
-
-        if (result.matchedCount > 0) {
-            res.send(`${cb}({success:true, color: "${color}", bio: "${bio}"});`);
-        } else {
-            res.send(`${cb}({success:false, msg: "User not found"});`);
-        }
-    } catch (e) {
-        res.send(`${req.query.cb}({success:false, msg: "Server error"});`);
-    }
+        if (result.matchedCount > 0) res.send(`${cb}({success:true, color: "${color}"});`);
+        else res.send(`${cb}({success:false});`);
+    } catch (e) { res.send(`${req.query.cb}({success:false});`); }
 });
 
 app.post('/update_profile_post', async (req, res) => {
     try {
-        const { user, pass, bio, customStatus, color } = req.body;
+        const { user, pass, bio, customStatus, pfp } = req.body;
         const updateDoc = {};
         if(bio !== undefined) updateDoc.bio = bio.substring(0, 150);
-        if(color !== undefined) updateDoc.color = color;
         if(customStatus !== undefined) updateDoc.customStatus = customStatus;
+        if(pfp !== undefined) updateDoc.pfp = pfp;
 
-        const result = await User.updateOne(
-            { username: user, password: pass },
-            { $set: updateDoc }
-        );
-
-        if (result.matchedCount > 0) {
-            res.json({ success: true, color });
-        } else {
-            res.json({ success: false, msg: "Auth failed" });
-        }
-    } catch (e) {
-        res.status(500).json({ success: false, msg: "Server Error" });
-    }
-});
-
-app.get('/logout_notify', async (req, res) => {
-    try {
-        const { user, room } = req.query;
-        const found = await User.findOne({ username: user });
-        if (found) {
-            // ECHTZEIT LEAVE: ROT (#ff4444)
-            await sysMsg(`${found.username} left the room.`, "#ff4444", false, null, false, room || "Main");
-            found.isOnlineNotify = false;
-            await found.save();
-        }
-        res.send("console.log('Logout logged');");
-    } catch(e) {}
+        const result = await User.updateOne({ username: user, password: pass }, { $set: updateDoc });
+        res.json({ success: result.matchedCount > 0 });
+    } catch (e) { res.status(500).json({ success: false }); }
 });
 
 app.get('/auth', async (req, res) => {
     try {
-        const { mode, user, pass, passConfirm, cb } = req.query;
-        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        const { mode, user, pass, cb } = req.query;
         const callback = cb || 'authCB';
-        const ipBanned = await IPBan.findOne({ ip });
-        if (ipBanned) return res.send(`${callback}({success:false, msg:'IP_BANNED', isBanned: true});`);
-
-        const minuteAgo = Date.now() - 60000;
-        const onlineCount = await User.countDocuments({ lastSeen: { $gt: minuteAgo } });
-
+        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        
         if (mode === 'check') {
-            const pureName = user?.trim().toLowerCase();
-            const existing = await User.findOne({ pureName });
-            const isValid = /^[a-zA-Z0-9]{5,}$/.test(user || ""); 
-            return res.send(`${callback}(${JSON.stringify({ taken: !!existing, valid: isValid })});`);
+            const existing = await User.findOne({ pureName: user?.trim().toLowerCase() });
+            return res.send(`${callback}(${JSON.stringify({ taken: !!existing, valid: user?.length >= 5 })});`);
         }
 
         if (mode === 'register') {
-            if (onlineCount >= 150) return res.send(`${callback}({success:false, msg:'Server full'});`);
-            const validate = (str) => /^[a-zA-Z0-9]{5,}$/.test(str);
-            if (!validate(user) || !validate(pass)) return res.send(`${callback}({success:false, msg:'Invalid chars'});`);
-            if (pass !== passConfirm) return res.send(`${callback}({success:false, msg:'Mismatch'});`);
-            try {
-                const pureName = user.trim().toLowerCase();
-                const existing = await User.findOne({ pureName });
-                if (existing) return res.send(`${callback}({success:false, msg:'Taken'});`);
-                const tag = Math.floor(1000 + Math.random() * 9000).toString();
-                const randomColor = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
-                await User.create({ username: `${user.trim()}#${tag}`, pureName, password: pass, color: randomColor, lastIp: ip, lastSeen: Date.now() });
-                return res.send(`${callback}({success:true, msg:'Created!'});`);
-            } catch(e) { return res.send(`${callback}({success:false, msg:'Error'});`); }
+            const pureName = user.trim().toLowerCase();
+            const existing = await User.findOne({ pureName });
+            if (existing) return res.send(`${callback}({success:false, msg:'Taken'});`);
+            const tag = Math.floor(1000 + Math.random() * 9000).toString();
+            const randomColor = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
+            await User.create({ username: `${user.trim()}#${tag}`, pureName, password: pass, color: randomColor, lastIp: ip, lastSeen: Date.now() });
+            return res.send(`${callback}({success:true, msg:'Created'});`);
         } else {
             const found = await User.findOne({ pureName: user?.trim().toLowerCase(), password: pass });
-            if (!found) return res.send(`${callback}({success:false, msg:'Login failed'});`);
+            if (!found) return res.send(`${callback}({success:false, msg:'Fail'});`);
+            if (found.isBanned && !found.isAdmin) return res.send(`${callback}({success:false, isBanned: true});`);
             
-            if (found.isBanned && !found.isAdmin) {
-                if (found.banExpires > 0 && Date.now() > found.banExpires) {
-                    found.isBanned = false; found.banExpires = 0; await found.save();
-                } else { 
-                    const timeLeft = Math.ceil((found.banExpires - Date.now()) / 60000);
-                    return res.send(`${callback}({success:false, msg: 'BANNED', isBanned: true, banTimeLeft: timeLeft + " min"});`); 
-                }
-            }
-
             found.lastIp = ip; found.lastSeen = Date.now();
             if (!found.isOnlineNotify) {
-                // ECHTZEIT JOIN: GRÜN (#44ff44) oder ADMIN NACHRICHT
-                if (found.isAdmin) {
-                    await sysMsg("⚠️ THE ADMIN IS HERE! ⚠️", "#ff0000", false, null, false, "Main");
-                } else {
-                    await sysMsg(`${found.username} joined`, "#44ff44", false, null, false, "Main");
-                }
+                const joinCol = found.isAdmin ? "#ff0000" : "#44ff44";
+                await sysMsg(found.isAdmin ? `⚠️ THE ADMIN IS HERE! ⚠️` : `${found.username} joined`, joinCol);
                 found.isOnlineNotify = true;
             }
             await found.save();
-            return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color || '#fff'}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}", pfp: "${found.pfp || ""}"});`);
+            return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}", pfp: "${found.pfp || ""}"});`);
         }
-    } catch(e) { res.send(`${cb || 'authCB'}({success:false, msg:'Server Error'});`); }
-});
-
-app.get('/delete', async (req, res) => {
-    const { id, user, pass } = req.query;
-    const requester = await User.findOne({ username: user, password: pass });
-    if (!requester) return res.send("console.log('Auth failed');");
-    
-    if (requester.isAdmin) {
-        await Message.findByIdAndUpdate(id, { text: "$$ADMIN_DEL$$", isSystem: false });
-        res.send("console.log('Deleted by Admin');");
-    } else {
-        const msg = await Message.findById(id);
-        if (msg && msg.user === requester.username) {
-            await Message.findByIdAndUpdate(id, { text: "$$USER_DEL$$", isSystem: false });
-            res.send("console.log('Deleted by User');");
-        } else {
-            res.send("console.log('Unauthorized');");
-        }
-    }
+    } catch(e) { res.send(`${cb}({success:false});`); }
 });
 
 app.get('/typing', async (req, res) => {
     const { user, room } = req.query;
     await User.findOneAndUpdate({ username: user }, { typingAt: Date.now(), typingRoom: room });
-    res.send("console.log('Typing...');");
+    res.send("1");
 });
 
 app.get('/send_safe', async (req, res) => {
     try {
-        const { user, text, pass, room, replyUser, replyText } = req.query;
-        const currentRoom = room || "Main";
+        const { user, text, pass, room } = req.query;
         const sender = await User.findOne({ username: user, password: pass });
-        if (!sender) return res.send("console.log('Auth error');");
-        if (sender.isBanned && !sender.isAdmin) return res.send("console.log('Banned');");
-
-        sender.messagesSent++;
-        sender.xp += Math.floor(Math.random() * 10) + 5;
-        if (sender.xp >= sender.level * 100) {
-            sender.level++; sender.xp = 0;
-            await sysMsg(`${sender.username} reached Level ${sender.level}! ✨`, "#ffaa00", false, null, false, currentRoom);
-        }
-        await sender.save();
-        await User.findOneAndUpdate({ username: user }, { typingAt: 0 });
+        if (!sender || sender.isBanned) return res.send("0");
         
-        if (sender.isAdmin && text.startsWith('/')) {
-            const args = text.split(' '); const cmd = args[0].toLowerCase();
-            if (cmd === '/help') { await sysMsg("Admin: /clear, /ban [ID], /ipban [ID], /unban [ID], /reset [Reason], /alert [Text], /shadow [ID]", "#00d4ff", false, user, false, currentRoom); return res.send("console.log('Help');"); }
-            if (cmd === '/alert') {
-                await Config.findOneAndUpdate({ key: 'global_alert' }, { value: args.slice(1).join(' ') }, { upsert: true });
-                setTimeout(async () => { await Config.deleteOne({ key: 'global_alert' }); }, 15000);
-                return res.send("console.log('Alert');");
-            }
-            if (cmd === '/shadow') {
-                const t = await User.findOne({ username: { $regex: `#${args[1]}$` } });
-                if(t && !t.isAdmin) { t.isShadowBanned = !t.isShadowBanned; await t.save(); }
-                return res.send("console.log('Shadow');");
-            }
-            if (cmd === '/clear') { await Message.deleteMany({ room: currentRoom }); await sysMsg("Chat cleared", "#ffff00", false, null, false, currentRoom); return res.send("console.log('Cleared');"); }
-            if (cmd === '/ban' || cmd === '/ipban') {
-                const t = await User.findOne({ username: { $regex: `#${args[1]}$` } });
-                if(t && !t.isAdmin) {
-                    t.isBanned = true; t.banExpires = (parseInt(args[2]) > 0) ? Date.now() + (parseInt(args[2]) * 60000) : 0;
-                    if(cmd === '/ipban' && t.lastIp) await IPBan.create({ ip: t.lastIp });
-                    await t.save(); await sysMsg(`${t.username} banned.`, "#ffff00", false, null, false, currentRoom);
-                }
-                return res.send("console.log('Banned');");
-            }
-            if (cmd === '/reset') {
-                const rId = Date.now().toString(); const reason = args.slice(1).join(' ') || "Update";
-                await Message.deleteMany({}); await DirectMessage.deleteMany({}); await Friendship.deleteMany({});
-                await User.deleteMany({ isAdmin: false }); await User.updateMany({ isAdmin: true }, { isOnlineNotify: false, lastIp: "", typingAt: 0, lastSeen: 0, level: 1, xp: 0, messagesSent: 0 });
-                await Config.findOneAndUpdate({ key: 'reset_trigger' }, { value: rId }, { upsert: true }); await Config.findOneAndUpdate({ key: 'reset_reason' }, { value: reason }, { upsert: true });
-                await sysMsg("SYSTEM RESET", "#ff0000", true, null, true, "Main", reason);
-                return res.send("console.log('Reset triggered');");
-            }
-            if (cmd === '/unban') {
-                const t = await User.findOne({ username: { $regex: `#${args[1]}$` } });
-                if(t) { t.isBanned = false; t.banExpires = 0; t.isShadowBanned = false; await t.save(); if(t.lastIp) await IPBan.deleteMany({ ip: t.lastIp }); await sysMsg(`${t.username} was unbanned.`, "#44ff44", false, null, false, currentRoom); }
-                return res.send("console.log('Unbanned');");
-            }
-        }
-        let replyObj = null;
-        if (replyUser && replyText) { replyObj = { user: replyUser, text: replyText.substring(0, 50) + "..." }; }
-        await Message.create({ user, text, color: sender.color, status: sender.status, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), room: currentRoom, forUser: sender.isShadowBanned ? user : null, replyTo: replyObj });
-        res.send("console.log('Sent');");
-    } catch(e) { res.send("console.log('Err');"); }
+        await Message.create({ 
+            user, text, color: sender.color, status: sender.status, 
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 
+            room: room || "Main", userIp: sender.lastIp
+        });
+        await User.findOneAndUpdate({ username: user }, { typingAt: 0 });
+        res.send("1");
+    } catch(e) { res.send("0"); }
 });
 
 app.get('/check_updates', async (req, res) => {
     const { callback, user, room } = req.query;
     if (user) await User.updateOne({ username: user }, { lastSeen: Date.now() });
     
-    const rooms = ["Main", "English", "German", "Buy & Sell"];
-    const counts = {};
-    for (let r of rooms) counts[r] = await Message.countDocuments({ room: r });
-    
     const typingNow = await User.findOne({ typingAt: { $gt: Date.now() - 3000 }, typingRoom: room, username: { $ne: user } });
     const onlineCount = await User.countDocuments({ lastSeen: { $gt: Date.now() - 60000 } });
-    
-    let myColor = "#ffffff";
-    let isBanned = false;
-    let banTimeLeft = "";
-
-    if (user) { 
-        const me = await User.findOne({ username: user }); 
-        if (me) {
-            myColor = me.color;
-            isBanned = me.isBanned;
-            if(isBanned && me.banExpires > 0) {
-                banTimeLeft = Math.ceil((me.banExpires - Date.now()) / 60000) + " min";
-            }
-        } 
-    }
+    const me = user ? await User.findOne({ username: user }) : null;
 
     res.send(`${callback}(${JSON.stringify({ 
-        counts, onlineCount, typingUser: typingNow ? typingNow.username : null,
-        myColor: myColor,
-        isBanned: isBanned,
-        banTimeLeft: banTimeLeft
+        onlineCount, 
+        typingUser: typingNow ? typingNow.username : null,
+        isBanned: me ? me.isBanned : false,
+        banTimeLeft: me && me.banExpires > 0 ? Math.ceil((me.banExpires - Date.now()) / 60000) + " min" : ""
     })});`);
 });
 
 app.get('/messages_jsonp', async (req, res) => {
-    const { user, pass, room, callback } = req.query;
+    const { room, callback, user, pass } = req.query;
     const requester = await User.findOne({ username: user, password: pass });
-    
     let msgs = await Message.find({ room: room || "Main" }).sort({ _id: -1 }).limit(50);
     msgs = msgs.reverse();
-    const enrichedMsgs = [];
-    const userCache = {};
 
-    for (let m of msgs) {
-        let msgObj = m.toObject();
-        if (!userCache[msgObj.user]) {
-            const u = await User.findOne({ username: msgObj.user });
-            userCache[msgObj.user] = u ? { pfp: u.pfp, color: u.color, lastIp: u.lastIp, isAdmin: u.isAdmin } : { pfp: "", color: "#fff", lastIp: "", isAdmin: false };
-        }
-        msgObj.pfp = userCache[msgObj.user].pfp;
-        msgObj.color = userCache[msgObj.user].color || msgObj.color;
-        
-        if (requester && requester.isAdmin && !msgObj.isSystem && msgObj.user !== "SYSTEM") {
-            if (!userCache[msgObj.user].isAdmin) msgObj.userIp = userCache[msgObj.user].lastIp;
-        }
-        enrichedMsgs.push(msgObj);
+    const enriched = [];
+    for(let m of msgs) {
+        let obj = m.toObject();
+        const u = await User.findOne({ username: m.user });
+        if(u) { obj.pfp = u.pfp; obj.color = u.color; }
+        if(requester?.isAdmin) { obj.userIp = m.userIp; }
+        enriched.push(obj);
     }
-    res.send(`${callback}(${JSON.stringify(enrichedMsgs)});`);
-});
-
-app.use((err, req, res, next) => {
-    if (err.type === 'entity.too.large') {
-        res.status(413).json({ success: false, msg: 'Payload too large' });
-    } else {
-        res.status(500).json({ success: false, msg: 'Server Error' });
-    }
+    res.send(`${callback}(${JSON.stringify(enriched)});`);
 });
 
 app.listen(process.env.PORT || 10000);
