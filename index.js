@@ -5,7 +5,7 @@ const app = express();
 
 // --- KONFIGURATION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V34: Vouch System Online ❄️")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V35: Reviews Fixed & Admin Tools ❄️")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
@@ -35,16 +35,16 @@ const UserSchema = new mongoose.Schema({
     joinedAt: { type: Number, default: Date.now() },
     friends: { type: [String], default: [] },
     friendRequests: { type: [String], default: [] },
-    // Caching rating stats
+    // Rating Stats
     ratingSum: { type: Number, default: 0 },
     ratingCount: { type: Number, default: 0 }
 }, { strict: false });
 
 const ReviewSchema = new mongoose.Schema({
-    target: String, // Wen bewertet man
-    author: String, // Wer bewertet
-    stars: Number,  // 1-5
-    text: String,   // Kommentar
+    target: String, 
+    author: String, 
+    stars: Number, 
+    text: String,   
     date: { type: Number, default: Date.now() }
 });
 
@@ -71,6 +71,14 @@ const Review = mongoose.model('Review', ReviewSchema);
 const IPBan = mongoose.model('IPBan', BanSchema);
 const Message = mongoose.model('Message', MessageSchema);
 const Config = mongoose.model('Config', ConfigSchema);
+
+// --- HELPER: RECALCULATE RATINGS ---
+async function recalcRatings(username) {
+    const reviews = await Review.find({ target: username });
+    let sum = 0;
+    reviews.forEach(r => sum += r.stars);
+    await User.updateOne({ username: username }, { ratingSum: sum, ratingCount: reviews.length });
+}
 
 // --- SYSTEM NACHRICHTEN ---
 async function sysMsg(text, color = "#44ff44", room = "Main", isReset = false, reason = "") {
@@ -173,7 +181,7 @@ app.get('/get_profile', async (req, res) => {
         const found = await User.findOne({ username: target });
         if (!found) return res.send(`${cb}({success:false});`);
         
-        // Berechne Durchschnitt
+        // Berechne Durchschnitt live (oder aus DB)
         const avg = found.ratingCount > 0 ? (found.ratingSum / found.ratingCount).toFixed(1) : "0.0";
         
         res.send(`${cb}(${JSON.stringify({
@@ -209,7 +217,6 @@ app.post('/rate_user', async (req, res) => {
         const targetUser = await User.findOne({ username: target });
         if(!targetUser) return res.json({ success: false, msg: "User not found" });
 
-        // Checks
         if(user === target) return res.json({ success: false, msg: "Self-rating not allowed" });
         
         const existing = await Review.findOne({ author: user, target: target });
@@ -218,7 +225,6 @@ app.post('/rate_user', async (req, res) => {
         const starVal = parseInt(stars);
         if(starVal < 1 || starVal > 5) return res.json({ success: false, msg: "Invalid stars" });
 
-        // Save Review
         await Review.create({
             target: target,
             author: user,
@@ -227,19 +233,34 @@ app.post('/rate_user', async (req, res) => {
             date: Date.now()
         });
 
-        // Update User Stats
-        if(!targetUser.ratingSum) targetUser.ratingSum = 0;
-        if(!targetUser.ratingCount) targetUser.ratingCount = 0;
-        
-        targetUser.ratingSum += starVal;
-        targetUser.ratingCount++;
-        await targetUser.save();
+        // Recalculate
+        await recalcRatings(target);
 
         res.json({ success: true });
     } catch(e) {
         console.log(e);
         res.json({ success: false, msg: "Server Error" });
     }
+});
+
+// 5. REVIEW LÖSCHEN (ADMIN)
+app.get('/delete_review', async (req, res) => {
+    try {
+        const { id, user, pass, cb } = req.query;
+        const admin = await User.findOne({ username: user, password: pass });
+        if(!admin || !admin.isAdmin) return res.send(`${cb}({success:false, msg:'No Permission'});`);
+        
+        const review = await Review.findById(id);
+        if(!review) return res.send(`${cb}({success:false, msg:'Review not found'});`);
+        
+        const targetName = review.target;
+        await Review.findByIdAndDelete(id);
+        
+        // Recalculate target stats
+        await recalcRatings(targetName);
+
+        res.send(`${cb}({success:true});`);
+    } catch(e) { res.send(`${req.query.cb}({success:false});`); }
 });
 
 
@@ -323,8 +344,11 @@ app.get('/send_safe', async (req, res) => {
                 const reason = args.slice(1).join(' ') || "Maintenance";
                 await Message.deleteMany({}); 
                 await User.deleteMany({ isAdmin: false }); 
+                // Reset Users, Ratings & Friends
                 await User.updateMany({ isAdmin: true }, { isOnlineNotify: false, lastIp: "", typingAt: 0, lastSeen: 0, level: 1, xp: 0, messagesSent: 0, friends: [], friendRequests: [], ratingSum: 0, ratingCount: 0 });
+                // Reset Reviews
                 await Review.deleteMany({});
+                
                 await Config.findOneAndUpdate({ key: 'reset_trigger' }, { value: Date.now().toString() }, { upsert: true }); 
                 await Config.findOneAndUpdate({ key: 'reset_reason' }, { value: reason }, { upsert: true });
                 await sysMsg("SYSTEM RESET INITIATED", "#ff0000", "Main", true, reason);
