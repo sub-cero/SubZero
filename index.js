@@ -5,7 +5,7 @@ const app = express();
 
 // --- KONFIGURATION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V38: Realtime Reviews Fixed ❄️")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V40: Complete Backend ❄️")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
@@ -205,7 +205,7 @@ app.get('/get_reviews', async (req, res) => {
     } catch (e) { res.send(`${req.query.cb}([]);`); }
 });
 
-// 4. BEWERTUNG ABGEBEN (GET)
+// 4. BEWERTUNG ABGEBEN (GET für Stabilität)
 app.get('/rate_user', async (req, res) => {
     try {
         const { user, pass, target, stars, text, cb } = req.query;
@@ -369,6 +369,7 @@ app.get('/delete', async (req, res) => {
     const reqUser = await User.findOne({ username: user, password: pass });
     if (!reqUser) return;
     
+    // UPDATED DELETE LOGIC
     if (reqUser.isAdmin) {
         await Message.findByIdAndUpdate(id, { text: "$$ADMIN_DEL$$", isSystem: false });
     } else {
