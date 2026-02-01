@@ -5,7 +5,7 @@ const app = express();
 
 // --- KONFIGURATION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V42: Advanced Ban System ❄️")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V43: News & Trusted Reviews ❄️")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
@@ -35,6 +35,7 @@ const UserSchema = new mongoose.Schema({
     joinedAt: { type: Number, default: Date.now() },
     friends: { type: [String], default: [] },
     friendRequests: { type: [String], default: [] },
+    // Rating Stats
     ratingSum: { type: Number, default: 0 },
     ratingCount: { type: Number, default: 0 }
 }, { strict: false });
@@ -44,6 +45,7 @@ const ReviewSchema = new mongoose.Schema({
     author: String, 
     stars: Number, 
     text: String,   
+    isVerified: { type: Boolean, default: false }, // NEW: Admin Trust Badge
     date: { type: Number, default: Date.now() }
 });
 
@@ -134,18 +136,13 @@ app.get('/auth', async (req, res) => {
         } else {
             const found = await User.findOne({ pureName: user?.trim().toLowerCase(), password: pass });
             if (!found) return res.send(`${callback}({success:false, msg:'Login failed'});`);
-            
-            // BAN CHECK
             if (found.isBanned && !found.isAdmin) {
                 if (found.banExpires > 0 && Date.now() > found.banExpires) {
-                    // Auto Unban
                     found.isBanned = false; found.banExpires = 0; await found.save();
                 } else { 
-                    // Still Banned - Send timestamp
                     return res.send(`${callback}({success:false, msg: 'BANNED', isBanned: true, banExpires: ${found.banExpires}});`); 
                 }
             }
-
             found.lastIp = ip; found.lastSeen = Date.now();
             if (!found.isOnlineNotify) {
                 if (found.isAdmin) await sysMsg("⚠️ THE ADMIN IS HERE! ⚠️", "#ff0000", "Main");
@@ -181,18 +178,22 @@ app.get('/get_profile', async (req, res) => {
 app.get('/get_reviews', async (req, res) => {
     try {
         const { target, cb } = req.query;
-        const reviews = await Review.find({ target: target }).sort({ date: -1 }).limit(20);
+        // SORTING: Verified first (-1), then Date (-1)
+        const reviews = await Review.find({ target: target }).sort({ isVerified: -1, date: -1 }).limit(20);
         res.send(`${cb}(${JSON.stringify(reviews)});`);
     } catch (e) { res.send(`${req.query.cb}([]);`); }
 });
 
 app.get('/rate_user', async (req, res) => {
     try {
-        const { user, pass, target, stars, text, cb } = req.query;
+        const { user, pass, target, stars, text, verified, cb } = req.query;
+        
         const author = await User.findOne({ username: user, password: pass });
         if(!author) return res.send(`${cb}({success:false, msg:'Auth error'});`);
+        
         const targetUser = await User.findOne({ username: target });
         if(!targetUser) return res.send(`${cb}({success:false, msg:'User not found'});`);
+
         if(user === target) return res.send(`${cb}({success:false, msg:'Self-rating denied'});`);
         
         const existing = await Review.findOne({ author: user, target: target });
@@ -201,10 +202,25 @@ app.get('/rate_user', async (req, res) => {
         const starVal = parseInt(stars);
         if(starVal < 1 || starVal > 5) return res.send(`${cb}({success:false, msg:'Invalid stars'});`);
 
-        await Review.create({ target: target, author: user, stars: starVal, text: text ? text.substring(0, 200) : "", date: Date.now() });
+        // Only Admin can set Verified
+        let isVerified = false;
+        if(author.isAdmin && verified === 'true') isVerified = true;
+
+        await Review.create({
+            target: target,
+            author: user,
+            stars: starVal,
+            text: text ? text.substring(0, 200) : "",
+            isVerified: isVerified,
+            date: Date.now()
+        });
+
         await recalcRatings(target);
         res.send(`${cb}({success:true});`);
-    } catch(e) { res.send(`${req.query.cb}({success:false, msg:'Error'});`); }
+    } catch(e) {
+        console.log(e);
+        res.send(`${req.query.cb}({success:false, msg:'Error'});`);
+    }
 });
 
 app.get('/delete_review', async (req, res) => {
@@ -238,6 +254,11 @@ app.get('/send_safe', async (req, res) => {
         if (!sender) return res.send("0"); 
         if (sender.isBanned && !sender.isAdmin) return res.send("0"); 
 
+        // NEWS ROOM PROTECTION
+        if (currentRoom === 'News & Updates' && !sender.isAdmin) {
+            return res.send("0"); // Silent fail for simplicity, frontend shows toast
+        }
+
         sender.messagesSent++;
         sender.xp += 10;
         if (sender.xp >= sender.level * 100) {
@@ -262,33 +283,21 @@ app.get('/send_safe', async (req, res) => {
             }
             if (cmd === '/ban' || cmd === '/ipban') {
                 const targetName = args[1];
-                const durationStr = args[2]; // "01", "1000", "24"
-                
+                const durationStr = args[2]; 
                 const target = await User.findOne({ username: { $regex: `#${targetName}$` } });
-                
                 if(target && !target.isAdmin && durationStr) {
                     target.isBanned = true; 
-                    
                     const val = parseInt(durationStr);
                     let expiryTime = 0;
-
-                    if (val > 999) {
-                        // PERMANENT BAN (100 Years)
-                        expiryTime = Date.now() + (100 * 365 * 24 * 60 * 60 * 1000); 
-                    } else {
-                        // TEMP BAN
-                        let multiplier = 1; // Minutes
-                        if (durationStr.startsWith('0')) multiplier = 60; // Hours (leading zero)
-                        
-                        // Fix parsing: "024" -> 24. 
+                    if (val > 999) expiryTime = Date.now() + (100 * 365 * 24 * 60 * 60 * 1000); 
+                    else {
+                        let multiplier = 1; 
+                        if (durationStr.startsWith('0')) multiplier = 60; 
                         expiryTime = Date.now() + (val * multiplier * 60000);
                     }
-
                     target.banExpires = expiryTime;
-
                     if(cmd === '/ipban' && target.lastIp) await IPBan.create({ ip: target.lastIp });
                     await target.save(); 
-                    
                     const type = (val > 999) ? "PERMANENTLY" : "temporarily";
                     await sysMsg(`${target.username} BANNED ${type}.`, "#ff0000", currentRoom);
                 }
@@ -340,7 +349,7 @@ app.get('/check_updates', async (req, res) => {
     const { callback, user, room } = req.query;
     if (user) await User.updateOne({ username: user }, { lastSeen: Date.now() });
     
-    const rooms = ["Main", "English", "German", "Buy & Sell"];
+    const rooms = ["Main", "English", "German", "Buy & Sell", "News & Updates"];
     const counts = {};
     for (let r of rooms) counts[r] = await Message.countDocuments({ room: r });
     
@@ -365,7 +374,6 @@ app.get('/check_updates', async (req, res) => {
 
     if (user) me = await User.findOne({ username: user });
 
-    // Send ban timestamp explicitly
     res.send(`${callback}(${JSON.stringify({ 
         counts, onlineCount, 
         typingUser: typingNow ? typingNow.username : null,
