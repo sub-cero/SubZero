@@ -5,7 +5,7 @@ const app = express();
 
 // --- KONFIGURATION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V40: Complete Backend ❄️")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V41: Smart Sorting Online ❄️")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
@@ -35,7 +35,6 @@ const UserSchema = new mongoose.Schema({
     joinedAt: { type: Number, default: Date.now() },
     friends: { type: [String], default: [] },
     friendRequests: { type: [String], default: [] },
-    // Rating Stats
     ratingSum: { type: Number, default: 0 },
     ratingCount: { type: Number, default: 0 }
 }, { strict: false });
@@ -72,7 +71,7 @@ const IPBan = mongoose.model('IPBan', BanSchema);
 const Message = mongoose.model('Message', MessageSchema);
 const Config = mongoose.model('Config', ConfigSchema);
 
-// --- HELPER: RECALCULATE RATINGS ---
+// --- HELPER ---
 async function recalcRatings(username) {
     const reviews = await Review.find({ target: username });
     let sum = 0;
@@ -80,7 +79,6 @@ async function recalcRatings(username) {
     await User.updateOne({ username: username }, { ratingSum: sum, ratingCount: reviews.length });
 }
 
-// --- SYSTEM NACHRICHTEN ---
 async function sysMsg(text, color = "#44ff44", room = "Main", isReset = false, reason = "") {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     try {
@@ -91,7 +89,7 @@ async function sysMsg(text, color = "#44ff44", room = "Main", isReset = false, r
     } catch (e) {}
 }
 
-// --- AUTOMATISCHER LEAVE CHECK (Alle 15s) ---
+// --- LOOP ---
 setInterval(async () => {
     try {
         const minuteAgo = Date.now() - 60000;
@@ -106,7 +104,6 @@ setInterval(async () => {
 
 // --- ENDPOINTS ---
 
-// 1. LOGIN & REGISTER
 app.get('/auth', async (req, res) => {
     try {
         const { mode, user, pass, passConfirm, cb } = req.query;
@@ -126,26 +123,17 @@ app.get('/auth', async (req, res) => {
         if (mode === 'register') {
             if (user.length < 5) return res.send(`${callback}({success:false, msg:'Too short'});`);
             if (pass !== passConfirm) return res.send(`${callback}({success:false, msg:'Mismatch'});`);
-            
             try {
                 const existing = await User.findOne({ pureName: user.trim().toLowerCase() });
                 if (existing) return res.send(`${callback}({success:false, msg:'Taken'});`);
-                
                 const tag = Math.floor(1000 + Math.random() * 9000).toString();
                 const randomColor = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
-                
-                await User.create({ 
-                    username: `${user.trim()}#${tag}`, pureName: user.trim().toLowerCase(), 
-                    password: pass, color: randomColor, lastIp: ip, lastSeen: Date.now() 
-                });
+                await User.create({ username: `${user.trim()}#${tag}`, pureName: user.trim().toLowerCase(), password: pass, color: randomColor, lastIp: ip, lastSeen: Date.now() });
                 return res.send(`${callback}({success:true, msg:'Created'});`);
             } catch(e) { return res.send(`${callback}({success:false, msg:'Error'});`); }
-        } 
-        
-        else {
+        } else {
             const found = await User.findOne({ pureName: user?.trim().toLowerCase(), password: pass });
             if (!found) return res.send(`${callback}({success:false, msg:'Login failed'});`);
-            
             if (found.isBanned && !found.isAdmin) {
                 if (found.banExpires > 0 && Date.now() > found.banExpires) {
                     found.isBanned = false; found.banExpires = 0; await found.save();
@@ -154,35 +142,26 @@ app.get('/auth', async (req, res) => {
                     return res.send(`${callback}({success:false, msg: 'BANNED', isBanned: true, banTimeLeft: timeLeft + " min"});`); 
                 }
             }
-
             found.lastIp = ip; found.lastSeen = Date.now();
-            
             if (!found.isOnlineNotify) {
-                if (found.isAdmin) {
-                    await sysMsg("⚠️ THE ADMIN IS HERE! ⚠️", "#ff0000", "Main");
-                } else {
-                    await sysMsg(`${found.username} joined`, "#44ff44", "Main");
-                }
+                if (found.isAdmin) await sysMsg("⚠️ THE ADMIN IS HERE! ⚠️", "#ff0000", "Main");
+                else await sysMsg(`${found.username} joined`, "#44ff44", "Main");
                 found.isOnlineNotify = true;
             }
             if(!found.friends) found.friends = [];
             if(!found.friendRequests) found.friendRequests = [];
-
             await found.save();
             return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color || '#fff'}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}", pfp: "${found.pfp || ""}", friends: ${JSON.stringify(found.friends)}, requests: ${JSON.stringify(found.friendRequests)}});`);
         }
     } catch(e) { res.send(`${cb || 'authCB'}({success:false, msg:'Server Error'});`); }
 });
 
-// 2. PROFIL ABFRAGEN (Mit Rating Stats)
 app.get('/get_profile', async (req, res) => {
     try {
         const { target, cb } = req.query;
         const found = await User.findOne({ username: target });
         if (!found) return res.send(`${cb}({success:false});`);
-        
         const avg = found.ratingCount > 0 ? (found.ratingSum / found.ratingCount).toFixed(1) : "0.0";
-        
         res.send(`${cb}(${JSON.stringify({
             username: found.username, color: found.color || "#ffffff",
             isAdmin: found.isAdmin, status: found.status, customStatus: found.customStatus, 
@@ -190,13 +169,11 @@ app.get('/get_profile', async (req, res) => {
             level: found.level, messages: found.messagesSent, 
             joinedAt: new Date(found.joinedAt).toLocaleDateString(),
             isOnline: found.lastSeen > Date.now() - 60000,
-            ratingAvg: avg,
-            ratingCount: found.ratingCount || 0
+            ratingAvg: avg, ratingCount: found.ratingCount || 0
         })});`);
     } catch (e) { res.send(`${req.query.cb}({success:false});`); }
 });
 
-// 3. REVIEWS LADEN
 app.get('/get_reviews', async (req, res) => {
     try {
         const { target, cb } = req.query;
@@ -205,17 +182,13 @@ app.get('/get_reviews', async (req, res) => {
     } catch (e) { res.send(`${req.query.cb}([]);`); }
 });
 
-// 4. BEWERTUNG ABGEBEN (GET für Stabilität)
 app.get('/rate_user', async (req, res) => {
     try {
         const { user, pass, target, stars, text, cb } = req.query;
-        
         const author = await User.findOne({ username: user, password: pass });
         if(!author) return res.send(`${cb}({success:false, msg:'Auth error'});`);
-        
         const targetUser = await User.findOne({ username: target });
         if(!targetUser) return res.send(`${cb}({success:false, msg:'User not found'});`);
-
         if(user === target) return res.send(`${cb}({success:false, msg:'Self-rating denied'});`);
         
         const existing = await Review.findOne({ author: user, target: target });
@@ -224,44 +197,26 @@ app.get('/rate_user', async (req, res) => {
         const starVal = parseInt(stars);
         if(starVal < 1 || starVal > 5) return res.send(`${cb}({success:false, msg:'Invalid stars'});`);
 
-        await Review.create({
-            target: target,
-            author: user,
-            stars: starVal,
-            text: text ? text.substring(0, 200) : "",
-            date: Date.now()
-        });
-
+        await Review.create({ target: target, author: user, stars: starVal, text: text ? text.substring(0, 200) : "", date: Date.now() });
         await recalcRatings(target);
-
         res.send(`${cb}({success:true});`);
-    } catch(e) {
-        console.log(e);
-        res.send(`${req.query.cb}({success:false, msg:'Error'});`);
-    }
+    } catch(e) { res.send(`${req.query.cb}({success:false, msg:'Error'});`); }
 });
 
-// 5. REVIEW LÖSCHEN (ADMIN)
 app.get('/delete_review', async (req, res) => {
     try {
         const { id, user, pass, cb } = req.query;
         const admin = await User.findOne({ username: user, password: pass });
         if(!admin || !admin.isAdmin) return res.send(`${cb}({success:false, msg:'No Permission'});`);
-        
         const review = await Review.findById(id);
-        if(!review) return res.send(`${cb}({success:false, msg:'Review not found'});`);
-        
+        if(!review) return res.send(`${cb}({success:false, msg:'Not found'});`);
         const targetName = review.target;
         await Review.findByIdAndDelete(id);
-        
         await recalcRatings(targetName);
-
         res.send(`${cb}({success:true});`);
     } catch(e) { res.send(`${req.query.cb}({success:false});`); }
 });
 
-
-// PROFIL UPDATE
 app.get('/update_profile_safe', async (req, res) => {
     try {
         const { user, bio, color, cb } = req.query;
@@ -270,20 +225,6 @@ app.get('/update_profile_safe', async (req, res) => {
     } catch (e) { res.send(`${req.query.cb}({success:false});`); }
 });
 
-app.post('/update_profile_post', async (req, res) => {
-    try {
-        const { user, pass, bio, customStatus, pfp } = req.body;
-        const updateDoc = {};
-        if(bio !== undefined) updateDoc.bio = bio.substring(0, 150);
-        if(customStatus !== undefined) updateDoc.customStatus = customStatus;
-        if(pfp !== undefined) updateDoc.pfp = pfp; 
-
-        await User.updateOne({ username: user, password: pass }, { $set: updateDoc });
-        res.json({ success: true });
-    } catch (e) { res.status(500).json({ success: false }); }
-});
-
-// MSG SENDEN
 app.get('/send_safe', async (req, res) => {
     try {
         const { user, text, pass, room } = req.query;
@@ -304,7 +245,6 @@ app.get('/send_safe', async (req, res) => {
 
         if (sender.isAdmin && text.startsWith('/')) {
             const args = text.split(' '); const cmd = args[0].toLowerCase();
-            
             if (cmd === '/alert') {
                 const msg = args.slice(1).join(' ');
                 await Config.findOneAndUpdate({ key: 'global_alert' }, { value: msg }, { upsert: true });
@@ -330,8 +270,7 @@ app.get('/send_safe', async (req, res) => {
             if (cmd === '/unban') {
                 const target = await User.findOne({ username: { $regex: `#${args[1]}$` } });
                 if(target) { 
-                    target.isBanned = false; target.banExpires = 0; 
-                    await target.save(); 
+                    target.isBanned = false; target.banExpires = 0; await target.save(); 
                     if(target.lastIp) await IPBan.deleteMany({ ip: target.lastIp }); 
                     await sysMsg(`${target.username} WAS UNBANNED.`, "#44ff44", currentRoom); 
                 }
@@ -343,7 +282,6 @@ app.get('/send_safe', async (req, res) => {
                 await User.deleteMany({ isAdmin: false }); 
                 await User.updateMany({ isAdmin: true }, { isOnlineNotify: false, lastIp: "", typingAt: 0, lastSeen: 0, level: 1, xp: 0, messagesSent: 0, friends: [], friendRequests: [], ratingSum: 0, ratingCount: 0 });
                 await Review.deleteMany({});
-                
                 await Config.findOneAndUpdate({ key: 'reset_trigger' }, { value: Date.now().toString() }, { upsert: true }); 
                 await Config.findOneAndUpdate({ key: 'reset_reason' }, { value: reason }, { upsert: true });
                 await sysMsg("SYSTEM RESET INITIATED", "#ff0000", "Main", true, reason);
@@ -351,15 +289,7 @@ app.get('/send_safe', async (req, res) => {
             }
         }
 
-        await Message.create({ 
-            user, text, 
-            color: sender.color, 
-            status: sender.status, 
-            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 
-            room: currentRoom, 
-            pfp: sender.pfp,
-            userIp: sender.lastIp 
-        });
+        await Message.create({ user, text, color: sender.color, status: sender.status, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), room: currentRoom, pfp: sender.pfp, userIp: sender.lastIp });
         res.send("1");
     } catch(e) { res.send("0"); }
 });
@@ -369,7 +299,6 @@ app.get('/delete', async (req, res) => {
     const reqUser = await User.findOne({ username: user, password: pass });
     if (!reqUser) return;
     
-    // UPDATED DELETE LOGIC
     if (reqUser.isAdmin) {
         await Message.findByIdAndUpdate(id, { text: "$$ADMIN_DEL$$", isSystem: false });
     } else {
@@ -392,9 +321,7 @@ app.get('/check_updates', async (req, res) => {
     if(user) {
         const dmRooms = await Message.distinct('room', { room: { $regex: 'DM_' } });
         for(let r of dmRooms) {
-            if(r.includes(user)) {
-                counts[r] = await Message.countDocuments({ room: r });
-            }
+            if(r.includes(user)) counts[r] = await Message.countDocuments({ room: r });
         }
     }
 
@@ -448,20 +375,15 @@ app.get('/logout_notify', async (req, res) => {
 
 app.get('/friend_request', async (req, res) => {
     const { user, pass, targetName, action } = req.query;
-    
     const me = await User.findOne({ username: user, password: pass });
     if(!me) return res.send("0");
-
     try {
         if(action === 'send') {
             const target = await User.findOne({ username: targetName });
-            if(!target) return; 
-            if(target.friends.includes(me.username)) return; 
-            if(target.friendRequests.includes(me.username)) return; 
+            if(!target || target.friends.includes(me.username) || target.friendRequests.includes(me.username)) return; 
             target.friendRequests.push(me.username);
             await target.save();
-        }
-        else if(action === 'accept') {
+        } else if(action === 'accept') {
             const target = await User.findOne({ username: targetName });
             if(!target) return;
             me.friendRequests = me.friendRequests.filter(u => u !== targetName);
@@ -469,22 +391,17 @@ app.get('/friend_request', async (req, res) => {
             await me.save();
             if(!target.friends.includes(me.username)) target.friends.push(me.username);
             await target.save();
-        }
-        else if(action === 'decline') {
+        } else if(action === 'decline') {
             me.friendRequests = me.friendRequests.filter(u => u !== targetName);
             await me.save();
-        }
-        else if(action === 'remove') {
+        } else if(action === 'remove') {
             const target = await User.findOne({ username: targetName });
             me.friends = me.friends.filter(u => u !== targetName);
             await me.save();
-            if(target) {
-                target.friends = target.friends.filter(u => u !== me.username);
-                await target.save();
-            }
+            if(target) { target.friends = target.friends.filter(u => u !== me.username); await target.save(); }
         }
         res.send("1");
-    } catch(e) { console.error(e); res.send("0"); }
+    } catch(e) { res.send("0"); }
 });
 
 app.listen(process.env.PORT || 10000);
