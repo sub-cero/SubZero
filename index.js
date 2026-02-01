@@ -5,7 +5,7 @@ const app = express();
 
 // --- KONFIGURATION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V32: Stable Backend Online ❄️")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V33: Social Backend Online ❄️")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
@@ -32,7 +32,10 @@ const UserSchema = new mongoose.Schema({
     isOnlineNotify: { type: Boolean, default: false },
     typingAt: { type: Number, default: 0 },
     typingRoom: { type: String, default: "" },
-    joinedAt: { type: Number, default: Date.now() }
+    joinedAt: { type: Number, default: Date.now() },
+    // NEU: Freundeslisten
+    friends: { type: [String], default: [] },
+    friendRequests: { type: [String], default: [] }
 }, { strict: false });
 
 const BanSchema = new mongoose.Schema({ ip: String });
@@ -144,16 +147,18 @@ app.get('/auth', async (req, res) => {
             // Join Nachricht (Nur wenn Status offline war)
             if (!found.isOnlineNotify) {
                 if (found.isAdmin) {
-                    // ADMIN JOIN (Rot & Warnung)
                     await sysMsg("⚠️ THE ADMIN IS HERE! ⚠️", "#ff0000", "Main");
                 } else {
-                    // USER JOIN (Grün)
                     await sysMsg(`${found.username} joined`, "#44ff44", "Main");
                 }
                 found.isOnlineNotify = true;
             }
+            // Sync Friends on Login if array is missing
+            if(!found.friends) found.friends = [];
+            if(!found.friendRequests) found.friendRequests = [];
+
             await found.save();
-            return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color || '#fff'}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}", pfp: "${found.pfp || ""}"});`);
+            return res.send(`${callback}({success:true, user: "${found.username}", color: "${found.color || '#fff'}", isAdmin: ${found.isAdmin}, status: "${found.status}", pass: "${found.password}", pfp: "${found.pfp || ""}", friends: ${JSON.stringify(found.friends)}, requests: ${JSON.stringify(found.friendRequests)}});`);
         }
     } catch(e) { res.send(`${cb || 'authCB'}({success:false, msg:'Server Error'});`); }
 });
@@ -212,7 +217,8 @@ app.get('/send_safe', async (req, res) => {
         sender.xp += 10;
         if (sender.xp >= sender.level * 100) {
             sender.level++; sender.xp = 0;
-            await sysMsg(`${sender.username} reached Level ${sender.level}! ✨`, "#ffff00", currentRoom);
+            // Nur im Main Chat Level Up anzeigen, um DMs nicht zu spammen
+            if(!currentRoom.startsWith("DM_")) await sysMsg(`${sender.username} reached Level ${sender.level}! ✨`, "#ffff00", currentRoom);
         }
         await sender.save();
         await User.findOneAndUpdate({ username: user }, { typingAt: 0 }); // Typing stop
@@ -257,8 +263,7 @@ app.get('/send_safe', async (req, res) => {
                 const reason = args.slice(1).join(' ') || "Maintenance";
                 await Message.deleteMany({}); 
                 await User.deleteMany({ isAdmin: false }); 
-                await User.updateMany({ isAdmin: true }, { isOnlineNotify: false, lastIp: "", typingAt: 0, lastSeen: 0, level: 1, xp: 0, messagesSent: 0 });
-                // Reset Trigger aktualisieren (ID ändert sich -> Frontend erkennt Wipe)
+                await User.updateMany({ isAdmin: true }, { isOnlineNotify: false, lastIp: "", typingAt: 0, lastSeen: 0, level: 1, xp: 0, messagesSent: 0, friends: [], friendRequests: [] });
                 await Config.findOneAndUpdate({ key: 'reset_trigger' }, { value: Date.now().toString() }, { upsert: true }); 
                 await Config.findOneAndUpdate({ key: 'reset_reason' }, { value: reason }, { upsert: true });
                 await sysMsg("SYSTEM RESET INITIATED", "#ff0000", "Main", true, reason);
@@ -266,7 +271,7 @@ app.get('/send_safe', async (req, res) => {
             }
         }
 
-        // Normale Nachricht (inkl. $$MARKET$$)
+        // Normale Nachricht
         await Message.create({ 
             user, text, 
             color: sender.color, 
@@ -297,23 +302,34 @@ app.get('/delete', async (req, res) => {
     res.send("1");
 });
 
-// 6. HEARTBEAT (Update Check)
+// 6. HEARTBEAT (Update Check + Benachrichtigungen)
 app.get('/check_updates', async (req, res) => {
     const { callback, user, room } = req.query;
     if (user) await User.updateOne({ username: user }, { lastSeen: Date.now() });
     
-    // Room Dots (Nachrichten zählen)
+    // Basis Räume
     const rooms = ["Main", "English", "German", "Buy & Sell"];
     const counts = {};
     for (let r of rooms) counts[r] = await Message.countDocuments({ room: r });
     
+    // DM Räume zählen (Für rote Punkte)
+    if(user) {
+        // Finde alle Räume, die mit "DM_" anfangen und meinen Namen enthalten
+        const dmRooms = await Message.distinct('room', { room: { $regex: 'DM_' } });
+        for(let r of dmRooms) {
+            if(r.includes(user)) {
+                counts[r] = await Message.countDocuments({ room: r });
+            }
+        }
+    }
+
     // Typing
     const typingNow = await User.findOne({ typingAt: { $gt: Date.now() - 3000 }, typingRoom: room, username: { $ne: user } });
     
     // Online Counter
     const onlineCount = await User.countDocuments({ lastSeen: { $gt: Date.now() - 60000 } });
     
-    // User Status & Configs
+    // User Stats
     let me = null;
     let globalAlert = null;
     let resetTrigger = null;
@@ -332,7 +348,10 @@ app.get('/check_updates', async (req, res) => {
         myPfp: me ? me.pfp : "",
         isBanned: me ? me.isBanned : false,
         banTimeLeft: me && me.banExpires > 0 ? Math.ceil((me.banExpires - Date.now()) / 60000) + " min" : "",
-        globalAlert, resetTrigger, resetReason
+        globalAlert, resetTrigger, resetReason,
+        // NEU: Listen senden
+        friends: me ? me.friends : [],
+        requests: me ? me.friendRequests : []
     })});`);
 });
 
@@ -357,6 +376,64 @@ app.get('/logout_notify', async (req, res) => {
         found.isOnlineNotify = false; await found.save();
     }
     res.send("1");
+});
+
+// 9. FREUNDSCHAFTS-SYSTEM
+app.get('/friend_request', async (req, res) => {
+    const { user, pass, targetName, action } = req.query; // action: send, accept, decline, remove
+    
+    // 1. Authentifizieren
+    const me = await User.findOne({ username: user, password: pass });
+    if(!me) return res.send("0");
+
+    // 2. Aktion verarbeiten
+    try {
+        if(action === 'send') {
+            const target = await User.findOne({ username: targetName });
+            if(!target) return; // User not found
+            if(target.friends.includes(me.username)) return; // Schon befreundet
+            if(target.friendRequests.includes(me.username)) return; // Schon angefragt
+            
+            target.friendRequests.push(me.username);
+            await target.save();
+        }
+        
+        else if(action === 'accept') {
+            const target = await User.findOne({ username: targetName });
+            if(!target) return;
+            
+            // Bei mir anfrage löschen & freund adden
+            me.friendRequests = me.friendRequests.filter(u => u !== targetName);
+            if(!me.friends.includes(targetName)) me.friends.push(targetName);
+            await me.save();
+            
+            // Bei ihm freund adden (Request bei ihm muss nicht gelöscht werden, da er sie gesendet hat)
+            if(!target.friends.includes(me.username)) target.friends.push(me.username);
+            await target.save();
+        }
+        
+        else if(action === 'decline') {
+            me.friendRequests = me.friendRequests.filter(u => u !== targetName);
+            await me.save();
+        }
+        
+        else if(action === 'remove') {
+            const target = await User.findOne({ username: targetName });
+            
+            me.friends = me.friends.filter(u => u !== targetName);
+            await me.save();
+            
+            if(target) {
+                target.friends = target.friends.filter(u => u !== me.username);
+                await target.save();
+            }
+        }
+        
+        res.send("1");
+    } catch(e) {
+        console.error(e);
+        res.send("0");
+    }
 });
 
 app.listen(process.env.PORT || 10000);
