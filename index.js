@@ -5,7 +5,7 @@ const app = express();
 
 // --- KONFIGURATION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V44: Verified Badge System ❄️")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V45: Trusted System & Pinning ❄️")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
@@ -37,7 +37,7 @@ const UserSchema = new mongoose.Schema({
     friendRequests: { type: [String], default: [] },
     ratingSum: { type: Number, default: 0 },
     ratingCount: { type: Number, default: 0 },
-    isVerified: { type: Boolean, default: false } // NEW: Global Trust Status
+    isVerified: { type: Boolean, default: false } 
 }, { strict: false });
 
 const ReviewSchema = new mongoose.Schema({
@@ -45,7 +45,7 @@ const ReviewSchema = new mongoose.Schema({
     author: String, 
     stars: Number, 
     text: String,   
-    isVerified: { type: Boolean, default: false }, // For the review sorting
+    isVerified: { type: Boolean, default: false }, // Controls pinning
     date: { type: Number, default: Date.now() }
 });
 
@@ -62,7 +62,7 @@ const MessageSchema = new mongoose.Schema({
     forUser: { type: String, default: null },
     pfp: String, 
     userIp: String,
-    isVerified: { type: Boolean, default: false } // Snapshot for chat
+    isVerified: { type: Boolean, default: false }
 });
 
 const ConfigSchema = new mongoose.Schema({ key: String, value: String });
@@ -180,6 +180,7 @@ app.get('/get_profile', async (req, res) => {
 app.get('/get_reviews', async (req, res) => {
     try {
         const { target, cb } = req.query;
+        // SORT: Verified Reviews (pinned) first, then newest
         const reviews = await Review.find({ target: target }).sort({ isVerified: -1, date: -1 }).limit(20);
         res.send(`${cb}(${JSON.stringify(reviews)});`);
     } catch (e) { res.send(`${req.query.cb}([]);`); }
@@ -197,22 +198,26 @@ app.get('/rate_user', async (req, res) => {
 
         if(user === target) return res.send(`${cb}({success:false, msg:'Self-rating denied'});`);
         
-        const existing = await Review.findOne({ author: user, target: target });
-        if(existing) return res.send(`${cb}({success:false, msg:'Already rated'});`);
-        
         const starVal = parseInt(stars);
         if(starVal < 1 || starVal > 5) return res.send(`${cb}({success:false, msg:'Invalid stars'});`);
 
-        // ADMIN SETS VERIFIED STATUS
+        // ADMIN TOGGLES VERIFIED STATUS
         let isVerifiedReview = false;
-        if(author.isAdmin && verified === 'true') {
-            isVerifiedReview = true;
-            targetUser.isVerified = true; // Set global User Status
+        
+        if(author.isAdmin) {
+            if(verified === 'true') {
+                targetUser.isVerified = true;
+                isVerifiedReview = true;
+            } else {
+                targetUser.isVerified = false; // UN-VERIFY
+                isVerifiedReview = false;
+            }
             await targetUser.save();
-            // Retroactive: Update all past messages to show the badge
-            await Message.updateMany({ user: target }, { isVerified: true });
+            // Retroactive Message Update: Add/Remove Badge
+            await Message.updateMany({ user: target }, { isVerified: targetUser.isVerified });
         }
 
+        // Save Review
         await Review.create({
             target: target,
             author: user,
@@ -238,11 +243,6 @@ app.get('/delete_review', async (req, res) => {
         const review = await Review.findById(id);
         if(!review) return res.send(`${cb}({success:false, msg:'Not found'});`);
         const targetName = review.target;
-        
-        // If it was a verified review, maybe we should un-verify the user? 
-        // For now, let's keep it simple: Deleting review doesn't automatically unverify, 
-        // as they might have other reasons. But usually you'd want manual unverify.
-        
         await Review.findByIdAndDelete(id);
         await recalcRatings(targetName);
         res.send(`${cb}({success:true});`);
@@ -338,7 +338,7 @@ app.get('/send_safe', async (req, res) => {
             user, text, color: sender.color, status: sender.status, 
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 
             room: currentRoom, pfp: sender.pfp, userIp: sender.lastIp,
-            isVerified: sender.isVerified // SAVE STATUS ON MSG
+            isVerified: sender.isVerified 
         });
         res.send("1");
     } catch(e) { res.send("0"); }
