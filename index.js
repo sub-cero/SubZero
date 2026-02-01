@@ -5,7 +5,7 @@ const app = express();
 
 // --- KONFIGURATION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V41: Smart Sorting Online ❄️")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V42: Advanced Ban System ❄️")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
@@ -134,14 +134,18 @@ app.get('/auth', async (req, res) => {
         } else {
             const found = await User.findOne({ pureName: user?.trim().toLowerCase(), password: pass });
             if (!found) return res.send(`${callback}({success:false, msg:'Login failed'});`);
+            
+            // BAN CHECK
             if (found.isBanned && !found.isAdmin) {
                 if (found.banExpires > 0 && Date.now() > found.banExpires) {
+                    // Auto Unban
                     found.isBanned = false; found.banExpires = 0; await found.save();
                 } else { 
-                    const timeLeft = Math.ceil((found.banExpires - Date.now()) / 60000);
-                    return res.send(`${callback}({success:false, msg: 'BANNED', isBanned: true, banTimeLeft: timeLeft + " min"});`); 
+                    // Still Banned - Send timestamp
+                    return res.send(`${callback}({success:false, msg: 'BANNED', isBanned: true, banExpires: ${found.banExpires}});`); 
                 }
             }
+
             found.lastIp = ip; found.lastSeen = Date.now();
             if (!found.isOnlineNotify) {
                 if (found.isAdmin) await sysMsg("⚠️ THE ADMIN IS HERE! ⚠️", "#ff0000", "Main");
@@ -257,13 +261,36 @@ app.get('/send_safe', async (req, res) => {
                 return res.send("1"); 
             }
             if (cmd === '/ban' || cmd === '/ipban') {
-                const target = await User.findOne({ username: { $regex: `#${args[1]}$` } });
-                if(target && !target.isAdmin) {
+                const targetName = args[1];
+                const durationStr = args[2]; // "01", "1000", "24"
+                
+                const target = await User.findOne({ username: { $regex: `#${targetName}$` } });
+                
+                if(target && !target.isAdmin && durationStr) {
                     target.isBanned = true; 
-                    target.banExpires = (parseInt(args[2]) > 0) ? Date.now() + (parseInt(args[2]) * 60000) : 0;
+                    
+                    const val = parseInt(durationStr);
+                    let expiryTime = 0;
+
+                    if (val > 999) {
+                        // PERMANENT BAN (100 Years)
+                        expiryTime = Date.now() + (100 * 365 * 24 * 60 * 60 * 1000); 
+                    } else {
+                        // TEMP BAN
+                        let multiplier = 1; // Minutes
+                        if (durationStr.startsWith('0')) multiplier = 60; // Hours (leading zero)
+                        
+                        // Fix parsing: "024" -> 24. 
+                        expiryTime = Date.now() + (val * multiplier * 60000);
+                    }
+
+                    target.banExpires = expiryTime;
+
                     if(cmd === '/ipban' && target.lastIp) await IPBan.create({ ip: target.lastIp });
                     await target.save(); 
-                    await sysMsg(`${target.username} BANNED.`, "#ff0000", currentRoom);
+                    
+                    const type = (val > 999) ? "PERMANENTLY" : "temporarily";
+                    await sysMsg(`${target.username} BANNED ${type}.`, "#ff0000", currentRoom);
                 }
                 return res.send("1");
             }
@@ -298,7 +325,6 @@ app.get('/delete', async (req, res) => {
     const { id, user, pass } = req.query;
     const reqUser = await User.findOne({ username: user, password: pass });
     if (!reqUser) return;
-    
     if (reqUser.isAdmin) {
         await Message.findByIdAndUpdate(id, { text: "$$ADMIN_DEL$$", isSystem: false });
     } else {
@@ -339,13 +365,14 @@ app.get('/check_updates', async (req, res) => {
 
     if (user) me = await User.findOne({ username: user });
 
+    // Send ban timestamp explicitly
     res.send(`${callback}(${JSON.stringify({ 
         counts, onlineCount, 
         typingUser: typingNow ? typingNow.username : null,
         myColor: me ? me.color : "#ffffff",
         myPfp: me ? me.pfp : "",
         isBanned: me ? me.isBanned : false,
-        banTimeLeft: me && me.banExpires > 0 ? Math.ceil((me.banExpires - Date.now()) / 60000) + " min" : "",
+        banExpires: me ? me.banExpires : 0, 
         globalAlert, resetTrigger, resetReason,
         friends: me ? me.friends : [],
         requests: me ? me.friendRequests : []
