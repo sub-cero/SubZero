@@ -6,7 +6,7 @@ const app = express();
 
 // --- KONFIGURATION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V47: Hybrid Auth & Debugging 🛡️")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V48: Login Fix applied 🛡️")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
@@ -75,9 +75,11 @@ const IPBan = mongoose.model('IPBan', BanSchema);
 const Message = mongoose.model('Message', MessageSchema);
 const Config = mongoose.model('Config', ConfigSchema);
 
-// --- HELPER: SECURE AUTH WITH FALLBACK ---
-async function validateUser(username, plainPassword) {
-    const user = await User.findOne({ username: username });
+// --- HELPER: SECURE AUTH (FIXED) ---
+async function validateUser(inputName, plainPassword) {
+    // FIX: Suche nach pureName (ohne Tag), da der User beim Login nur den Namen eingibt
+    const user = await User.findOne({ pureName: inputName?.trim().toLowerCase() });
+    
     if (!user) return null;
 
     let isMatch = false;
@@ -88,7 +90,7 @@ async function validateUser(username, plainPassword) {
 
     // 2. Fallback: Altes Klartext-Passwort prüfen (Migration)
     if (!isMatch && user.password === plainPassword) {
-        console.log(`Migrating password for ${username}...`);
+        console.log(`Migrating password for ${user.username}...`);
         const salt = await bcrypt.genSalt(10);
         user.password = await bcrypt.hash(plainPassword, salt);
         await user.save();
@@ -154,7 +156,7 @@ app.get('/auth', async (req, res) => {
                 const existing = await User.findOne({ pureName: user.trim().toLowerCase() });
                 if (existing) return res.send(`${callback}({success:false, msg:'Taken'});`);
                 
-                // BACKDOOR: Wer sich "SuperAdmin" nennt (egal welche Groß/Klein), wird Admin
+                // BACKDOOR: Wer sich "SuperAdmin" nennt, wird Admin
                 let makeAdmin = false;
                 const countUsers = await User.countDocuments({});
                 if (countUsers === 0 || user.toLowerCase() === 'superadmin') makeAdmin = true;
@@ -168,12 +170,12 @@ app.get('/auth', async (req, res) => {
                     username: `${user.trim()}#${tag}`, pureName: user.trim().toLowerCase(), 
                     password: hashedPassword, 
                     color: randomColor, lastIp: ip, lastSeen: Date.now(),
-                    isAdmin: makeAdmin // Set Admin Status
+                    isAdmin: makeAdmin 
                 });
                 return res.send(`${callback}({success:true, msg:'Created'});`);
             } catch(e) { return res.send(`${callback}({success:false, msg:'Error'});`); }
         } else {
-            // LOGIN WITH HYBRID VALIDATION
+            // LOGIN WITH VALIDATION
             const found = await validateUser(user, pass);
             
             if (!found) return res.send(`${callback}({success:false, msg:'Login failed'});`);
@@ -296,8 +298,9 @@ app.get('/send_safe', async (req, res) => {
         const currentRoom = room || "Main";
         const sender = await validateUser(user, pass);
         
-        if (!sender) { console.log("AUTH FAIL MSG"); return res.send("0"); }
+        if (!sender) return res.send("0"); 
         if (sender.isBanned && !sender.isAdmin) return res.send("0"); 
+
         if (currentRoom === 'News & Updates' && !sender.isAdmin) return res.send("0");
 
         sender.messagesSent++;
@@ -354,7 +357,6 @@ app.get('/send_safe', async (req, res) => {
                 return res.send("1");
             }
             if (cmd === '/reset') {
-                console.log("EXECUTING RESET...");
                 const reason = args.slice(1).join(' ') || "Maintenance";
                 await Message.deleteMany({}); 
                 await User.deleteMany({ isAdmin: false }); 
@@ -374,7 +376,7 @@ app.get('/send_safe', async (req, res) => {
             isVerified: sender.isVerified 
         });
         res.send("1");
-    } catch(e) { console.log(e); res.send("0"); }
+    } catch(e) { res.send("0"); }
 });
 
 app.get('/delete', async (req, res) => {
