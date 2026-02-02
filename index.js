@@ -7,7 +7,7 @@ const app = express();
 
 // --- DB CONNECTION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V54: Login & Layout Fix 🛡️")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V55: Auth & Grid Fix 🛡️")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
@@ -72,12 +72,12 @@ const IPBan = mongoose.model('IPBan', BanSchema);
 const Message = mongoose.model('Message', MessageSchema);
 const Config = mongoose.model('Config', ConfigSchema);
 
-// --- AUTH HELPER (SAFE) ---
+// --- AUTH HELPER (ROBUST FIX) ---
 async function validateUser(inputName, plainPassword) {
     if(!inputName) return null;
     const cleanName = inputName.trim();
     
-    // 1. Find User (by pure name OR full username)
+    // 1. Find User
     let user = await User.findOne({ pureName: cleanName.toLowerCase() });
     if (!user) user = await User.findOne({ username: cleanName });
 
@@ -85,19 +85,22 @@ async function validateUser(inputName, plainPassword) {
 
     let isMatch = false;
     
-    // 2. Check Password (Hash or Plaintext Migration)
-    if (user.password && user.password.startsWith('$2a$')) {
-        // Modern Hash
-        try { isMatch = await bcrypt.compare(plainPassword, user.password); } catch (e) { isMatch = false; }
-    } else {
-        // Legacy Plain Text (Auto-Migrate)
-        if (user.password === plainPassword) {
-            console.log(`Migrating password for ${user.username}`);
-            const salt = await bcrypt.genSalt(10);
-            user.password = await bcrypt.hash(plainPassword, salt);
-            await user.save();
-            isMatch = true;
+    // 2. ROBUST PASSWORD CHECK (Works with $2a$, $2b$, $2y$ etc.)
+    try {
+        if (user.password && user.password.startsWith('$')) {
+            isMatch = await bcrypt.compare(plainPassword, user.password);
         }
+    } catch (e) {
+        isMatch = false;
+    }
+
+    // 3. Fallback / Migration for old accounts
+    if (!isMatch && user.password === plainPassword) {
+        console.log(`Migrating password for ${user.username}`);
+        const salt = await bcrypt.genSalt(10);
+        user.password = await bcrypt.hash(plainPassword, salt);
+        await user.save();
+        isMatch = true;
     }
 
     return isMatch ? user : null;
@@ -129,7 +132,6 @@ setInterval(async () => {
 app.get('/auth', async (req, res) => {
     try {
         const { mode, user, pass, cb } = req.query;
-        // IP Logic: Get 2nd IP if available (Render Load Balancer)
         const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || "";
         const ipList = rawIp.split(',');
         const realIp = ipList.length > 1 ? ipList[1].trim() : ipList[0].trim();
@@ -177,7 +179,6 @@ app.get('/auth', async (req, res) => {
                 else await sysMsg(`${found.username} joined`, "#44ff44", "Main");
                 found.isOnlineNotify = true;
             }
-            // Ensure Arrays Exist
             if(!found.friends) found.friends = [];
             if(!found.friendRequests) found.friendRequests = [];
             
@@ -200,6 +201,10 @@ app.get('/auth', async (req, res) => {
         res.send(`${req.query.cb}({success:false, msg:'Server Error'});`); 
     }
 });
+
+// ... REST DES CODES BLEIBT GLEICH ...
+// (Lass den Rest so wie er war, nur validateUser und /auth wurden gehärtet)
+// Hier der Rest für Copy Paste Sicherheit:
 
 app.get('/get_profile', async (req, res) => {
     const found = await User.findOne({ username: req.query.target });
@@ -333,7 +338,7 @@ app.get('/messages_jsonp', async (req, res) => {
     let projection = { userIp: 0 };
     if (requester && reqPass) {
         const admin = await validateUser(requester, reqPass);
-        if (admin && admin.isAdmin) projection = {}; // SHOW IP FOR ADMIN
+        if (admin && admin.isAdmin) projection = {}; 
     }
     const msgs = await Message.find({ room: req.query.room || "Main" }, projection).sort({ _id: -1 }).limit(50);
     res.send(`${req.query.callback}(${JSON.stringify(msgs.reverse())});`);
