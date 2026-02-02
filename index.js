@@ -2,24 +2,22 @@ const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs'); 
-const https = require('https'); // Für den Self-Ping
+const https = require('https');
 const app = express();
 
-// --- KONFIGURATION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V50: Message Logic Fixed 🛡️")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V51: Admin IP View 👁️")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// --- ANTI-SLEEP (Self-Ping) ---
 app.get('/ping', (req, res) => { res.status(200).send('pong'); });
+
 setInterval(() => {
     https.get("https://subzero-hc18.onrender.com/ping", (res) => {}).on('error', (e) => console.error("Ping Error:", e.message));
-}, 30000); // Alle 30 Sek
+}, 30000);
 
-// --- SCHEMAS ---
 const UserSchema = new mongoose.Schema({
     username: { type: String, unique: true },
     pureName: { type: String, unique: true },
@@ -75,39 +73,28 @@ const MessageSchema = new mongoose.Schema({
 
 const ConfigSchema = new mongoose.Schema({ key: String, value: String });
 
-// --- MODELS ---
 const User = mongoose.model('User', UserSchema);
 const Review = mongoose.model('Review', ReviewSchema);
 const IPBan = mongoose.model('IPBan', BanSchema);
 const Message = mongoose.model('Message', MessageSchema);
 const Config = mongoose.model('Config', ConfigSchema);
 
-// --- HELPER: INTELLIGENT AUTH ---
 async function validateUser(inputName, plainPassword) {
     if(!inputName) return null;
-    
-    // FIX: Prüfe zuerst auf vollen Namen (Nachrichten), dann auf Kurznamen (Login)
     let user = await User.findOne({ username: inputName });
-    if (!user) {
-        user = await User.findOne({ pureName: inputName.trim().toLowerCase() });
-    }
-    
+    if (!user) user = await User.findOne({ pureName: inputName.trim().toLowerCase() });
     if (!user) return null;
 
     let isMatch = false;
-    // 1. Hash Check
     try { isMatch = await bcrypt.compare(plainPassword, user.password); } catch (e) { isMatch = false; }
 
-    // 2. Migration Check (Altes PW)
     if (!isMatch && user.password === plainPassword) {
         const salt = await bcrypt.genSalt(10);
         user.password = await bcrypt.hash(plainPassword, salt);
         await user.save();
         isMatch = true;
     }
-
-    if (!isMatch) return null;
-    return user;
+    return isMatch ? user : null;
 }
 
 async function recalcRatings(username) {
@@ -127,7 +114,6 @@ async function sysMsg(text, color = "#44ff44", room = "Main", isReset = false, r
     } catch (e) {}
 }
 
-// --- LOOP ---
 setInterval(async () => {
     try {
         const minuteAgo = Date.now() - 60000;
@@ -300,7 +286,7 @@ app.get('/send_safe', async (req, res) => {
     try {
         const { user, text, pass, room } = req.query;
         const currentRoom = room || "Main";
-        const sender = await validateUser(user, pass); // THIS NOW ACCEPTS FULL USERNAME
+        const sender = await validateUser(user, pass);
         
         if (!sender) return res.send("0"); 
         if (sender.isBanned && !sender.isAdmin) return res.send("0"); 
@@ -372,10 +358,12 @@ app.get('/send_safe', async (req, res) => {
             }
         }
 
+        const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || "";
         await Message.create({ 
             user, text, color: sender.color, status: sender.status, 
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 
-            room: currentRoom, pfp: sender.pfp, userIp: sender.lastIp,
+            room: currentRoom, pfp: sender.pfp, 
+            userIp: rawIp, // Store full IP chain
             isVerified: sender.isVerified 
         });
         res.send("1");
@@ -440,8 +428,17 @@ app.get('/check_updates', async (req, res) => {
 });
 
 app.get('/messages_jsonp', async (req, res) => {
-    const { room, callback } = req.query;
-    let msgs = await Message.find({ room: room || "Main" }, { userIp: 0 }).sort({ _id: -1 }).limit(50);
+    const { room, callback, requester, reqPass } = req.query;
+    let projection = { userIp: 0 }; // DEFAULT: IP HIDDEN
+
+    if (requester && reqPass) {
+        const adminCheck = await validateUser(requester, reqPass);
+        if (adminCheck && adminCheck.isAdmin) {
+            projection = {}; // SHOW EVERYTHING (IP INCLUDED)
+        }
+    }
+
+    let msgs = await Message.find({ room: room || "Main" }, projection).sort({ _id: -1 }).limit(50);
     res.send(`${callback}(${JSON.stringify(msgs.reverse())});`);
 });
 
