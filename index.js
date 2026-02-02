@@ -5,17 +5,18 @@ const bcrypt = require('bcryptjs');
 const https = require('https');
 const app = express();
 
+// --- DB CONNECTION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V56: MIME Type Fix 🛡️")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V57: Chat Fix 🚀")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.set('trust proxy', 1);
 
-// WICHTIG: Helper für JSONP Antworten mit korrektem Header
+// --- HELPER: SICHERES SENDEN ---
 const sendJS = (res, callback, data) => {
-    res.type('application/javascript'); // Zwingt Browser zur Ausführung
+    res.type('application/javascript'); 
     res.status(200).send(`${callback}(${JSON.stringify(data)});`);
 };
 
@@ -219,7 +220,7 @@ app.get('/delete_review', async (req, res) => {
     const admin = await validateUser(req.query.user, req.query.pass);
     if(!admin || !admin.isAdmin) return sendJS(res, req.query.cb, {success:false});
     await Review.findByIdAndDelete(req.query.id);
-    await recalcRatings(req.query.target); // Fixed: target needed
+    await recalcRatings(req.query.target); 
     sendJS(res, req.query.cb, {success:true});
 });
 
@@ -229,12 +230,14 @@ app.get('/update_profile_safe', async (req, res) => {
 });
 
 app.get('/send_safe', async (req, res) => {
-    // Keep this as plain text/numeric for lightweight sending
+    // FIX: Setze Content-Type, damit der Browser die Antwort akzeptiert
+    res.type('application/javascript'); 
+    
     const { user, text, pass, room } = req.query;
     const sender = await validateUser(user, pass);
-    if (!sender) return res.send("0"); 
-    if (sender.isBanned && !sender.isAdmin) return res.send("0"); 
-    if (room === 'News & Updates' && !sender.isAdmin) return res.send("0");
+    if (!sender) return res.send("/* Auth Failed */"); 
+    if (sender.isBanned && !sender.isAdmin) return res.send("/* Banned */"); 
+    if (room === 'News & Updates' && !sender.isAdmin) return res.send("/* No Perms */");
 
     sender.messagesSent++;
     if ((sender.xp += 10) >= sender.level * 100) { sender.level++; sender.xp = 0; await sysMsg(`${sender.username} reached Level ${sender.level}! ✨`, "#ffff00", room); }
@@ -245,9 +248,9 @@ app.get('/send_safe', async (req, res) => {
         if (cmd === '/alert') {
             await Config.findOneAndUpdate({ key: 'global_alert' }, { value: args.slice(1).join(' ') }, { upsert: true });
             setTimeout(async () => { await Config.deleteOne({ key: 'global_alert' }); }, 15000);
-            return res.send("1");
+            return res.send("/* Alert Sent */");
         }
-        if (cmd === '/clear') { await Message.deleteMany({ room }); await sysMsg("CHAT CLEARED", "#ffff00", room); return res.send("1"); }
+        if (cmd === '/clear') { await Message.deleteMany({ room }); await sysMsg("CHAT CLEARED", "#ffff00", room); return res.send("/* Cleared */"); }
         if (cmd === '/ban' || cmd === '/ipban') {
             const target = await User.findOne({ username: { $regex: `#${args[1]}$` } });
             if(target && !target.isAdmin) {
@@ -257,19 +260,19 @@ app.get('/send_safe', async (req, res) => {
                 await target.save();
                 await sysMsg(`${target.username} BANNED.`, "#ff0000", room);
             }
-            return res.send("1");
+            return res.send("/* Banned */");
         }
         if (cmd === '/unban') {
             const target = await User.findOne({ username: { $regex: `#${args[1]}$` } });
             if(target) { target.isBanned = false; await target.save(); await IPBan.deleteMany({ ip: target.lastIp }); await sysMsg(`${target.username} UNBANNED.`, "#44ff44", room); }
-            return res.send("1");
+            return res.send("/* Unbanned */");
         }
         if (cmd === '/reset') {
             await Message.deleteMany({}); await User.deleteMany({ isAdmin: false }); await Review.deleteMany({});
             await Config.findOneAndUpdate({ key: 'reset_trigger' }, { value: Date.now().toString() }, { upsert: true });
             await Config.findOneAndUpdate({ key: 'reset_reason' }, { value: args.slice(1).join(' ') || "Maintenance" }, { upsert: true });
             await sysMsg("SYSTEM RESET", "#ff0000", "Main", true);
-            return res.send("1");
+            return res.send("/* Reset */");
         }
     }
 
@@ -278,15 +281,15 @@ app.get('/send_safe', async (req, res) => {
         user, text, color: sender.color, status: sender.status, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 
         room: room || "Main", pfp: sender.pfp, userIp: rawIp, isVerified: sender.isVerified 
     });
-    res.send("1");
+    res.send("/* Message Sent */");
 });
 
 app.get('/delete', async (req, res) => {
     const reqUser = await validateUser(req.query.user, req.query.pass);
-    if (!reqUser) return;
+    if (!reqUser) return res.type('application/javascript').send("/* Auth fail */");
     if (reqUser.isAdmin) await Message.findByIdAndUpdate(req.query.id, { text: "$$ADMIN_DEL$$", isSystem: false });
     else await Message.findOneAndUpdate({ _id: req.query.id, user: reqUser.username }, { text: "$$USER_DEL$$", isSystem: false });
-    res.send("1");
+    res.type('application/javascript').send("/* Deleted */");
 });
 
 app.get('/check_updates', async (req, res) => {
@@ -324,11 +327,11 @@ app.get('/messages_jsonp', async (req, res) => {
     sendJS(res, req.query.callback, msgs.reverse());
 });
 
-app.get('/typing', async (req, res) => { await User.findOneAndUpdate({ username: req.query.user }, { typingAt: Date.now(), typingRoom: req.query.room }); res.send("1"); });
-app.get('/logout_notify', async (req, res) => { await sysMsg(`${req.query.user} left.`, "#ff4444", req.query.room); res.send("1"); });
+app.get('/typing', async (req, res) => { await User.findOneAndUpdate({ username: req.query.user }, { typingAt: Date.now(), typingRoom: req.query.room }); res.type('application/javascript').send("/* typing */"); });
+app.get('/logout_notify', async (req, res) => { await sysMsg(`${req.query.user} left.`, "#ff4444", req.query.room); res.type('application/javascript').send("/* bye */"); });
 app.get('/friend_request', async (req, res) => {
     const { user, pass, targetName, action } = req.query;
-    const me = await validateUser(user, pass); if(!me) return res.send("0");
+    const me = await validateUser(user, pass); if(!me) return res.type('application/javascript').send("0");
     const target = await User.findOne({ username: targetName });
     if (action === 'send' && target && !target.friends.includes(me.username)) { target.friendRequests.push(me.username); await target.save(); }
     if (action === 'accept' && target) { 
@@ -340,7 +343,7 @@ app.get('/friend_request', async (req, res) => {
         me.friends = me.friends.filter(u => u !== targetName); await me.save();
         target.friends = target.friends.filter(u => u !== me.username); await target.save();
     }
-    res.send("1");
+    res.type('application/javascript').send("/* Freq done */");
 });
 
 app.listen(process.env.PORT || 10000);
