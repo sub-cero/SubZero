@@ -6,13 +6,14 @@ const https = require('https');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V61: Speed Optimization ⚡")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V62: Chat & System Msgs Fix 🚀")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.set('trust proxy', 1);
 
+// --- HELPER ---
 const sendJS = (res, callback, data) => {
     res.type('application/javascript'); 
     res.status(200).send(`${callback}(${JSON.stringify(data)});`);
@@ -24,6 +25,7 @@ setInterval(() => {
     https.get("https://subzero-hc18.onrender.com/ping", (res) => {}).on('error', (e) => console.error("Ping Error:", e.message));
 }, 30000);
 
+// --- SCHEMAS ---
 const UserSchema = new mongoose.Schema({
     username: { type: String, unique: true },
     pureName: { type: String, unique: true },
@@ -86,7 +88,6 @@ async function validateUser(inputName, plainPassword) {
         if (user.password && user.password.startsWith('$')) { isMatch = await bcrypt.compare(plainPassword, user.password); }
     } catch (e) { isMatch = false; }
     if (!isMatch && user.password === plainPassword) {
-        // Migration to Cost 8 for speed
         const salt = await bcrypt.genSalt(8); 
         user.password = await bcrypt.hash(plainPassword, salt);
         await user.save();
@@ -101,20 +102,29 @@ async function recalcRatings(username) {
     await User.updateOne({ username: username }, { ratingSum: sum, ratingCount: reviews.length });
 }
 
+// SYSTEM MESSAGE HELPER (JOIN/LEAVE)
 async function sysMsg(text, color = "#44ff44", room = "Main", isReset = false, reason = "") {
-    try { await Message.create({ user: "SYSTEM", text, color, status: "SYS", time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), isSystem: true, room: room || "Main", isReset, resetReason: reason }); } catch (e) {}
+    try { 
+        await Message.create({ 
+            user: "SYSTEM", text, color, status: "SYS", 
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 
+            isSystem: true, room: room || "Main", isReset, resetReason: reason 
+        }); 
+    } catch (e) { console.error("SysMsg Error", e); }
 }
 
+// CHECK OFFLINE USERS
 setInterval(async () => {
     try {
         const minuteAgo = Date.now() - 60000;
         const lostUsers = await User.find({ lastSeen: { $lt: minuteAgo }, isOnlineNotify: true });
         for (let u of lostUsers) {
+            // Send leave message to Main room by default so everyone sees it
             await sysMsg(`${u.username} left the room.`, "#ff4444", "Main");
             u.isOnlineNotify = false; await u.save();
         }
     } catch (e) {}
-}, 15000);
+}, 10000); // Check every 10s
 
 app.get('/auth', async (req, res) => {
     const cb = req.query.cb || 'callback';
@@ -137,9 +147,7 @@ app.get('/auth', async (req, res) => {
             const existing = await User.findOne({ pureName: user.trim().toLowerCase() });
             if (existing) return sendJS(res, cb, {success:false, msg:'Taken'});
             
-            // SPEED OPTIMIZATION: Cost factor reduced to 8 (faster)
             const hashedPassword = await bcrypt.hash(pass, 8);
-            
             const userCount = await User.countDocuments({});
             const makeAdmin = (userCount === 0 || user.toLowerCase() === 'superadmin');
 
@@ -160,11 +168,14 @@ app.get('/auth', async (req, res) => {
             }
             
             found.lastIp = realIp; found.lastSeen = Date.now();
+            
+            // JOIN MESSAGE LOGIC
             if (!found.isOnlineNotify) {
                 if (found.isAdmin) await sysMsg("⚠️ THE ADMIN IS HERE! ⚠️", "#ff0000", "Main");
                 else await sysMsg(`${found.username} joined`, "#44ff44", "Main");
                 found.isOnlineNotify = true;
             }
+            
             if(!found.friends) found.friends = [];
             if(!found.friendRequests) found.friendRequests = [];
             await found.save();
@@ -231,10 +242,12 @@ app.get('/update_profile_safe', async (req, res) => {
 });
 
 app.get('/send_safe', async (req, res) => {
-    res.type('application/javascript');
+    res.type('application/javascript'); // IMPORTANT FOR BROWSER
     
     const { user, text, pass, room } = req.query;
     const sender = await validateUser(user, pass);
+    
+    // Always return VALID JS, even on error, to stop browser from hanging
     if (!sender) return res.send("/* Auth Failed */"); 
     if (sender.isBanned && !sender.isAdmin) return res.send("/* Banned */"); 
     if (room === 'News & Updates' && !sender.isAdmin) return res.send("/* No Perms */");
@@ -321,10 +334,8 @@ app.get('/delete', async (req, res) => {
 app.get('/check_updates', async (req, res) => {
     const { user, room } = req.query;
     
-    // 1. Update Last Seen (Async)
     if (user) User.updateOne({ username: user }, { lastSeen: Date.now() }).exec();
 
-    // 2. Parallel Database Queries (Optimized for Speed)
     const [counts, typing, ga, rt, rr, me, onlineCount] = await Promise.all([
         (async () => {
             const c = {};
@@ -372,7 +383,13 @@ app.get('/messages_jsonp', async (req, res) => {
 });
 
 app.get('/typing', async (req, res) => { await User.findOneAndUpdate({ username: req.query.user }, { typingAt: Date.now(), typingRoom: req.query.room }); res.type('application/javascript').send("/* typing */"); });
-app.get('/logout_notify', async (req, res) => { await sysMsg(`${req.query.user} left.`, "#ff4444", req.query.room); res.type('application/javascript').send("/* bye */"); });
+app.get('/logout_notify', async (req, res) => { 
+    // Trigger leave message
+    await sysMsg(`${req.query.user} left.`, "#ff4444", req.query.room); 
+    // Update DB so user isn't shown as online
+    await User.updateOne({ username: req.query.user }, { isOnlineNotify: false, lastSeen: 0 });
+    res.type('application/javascript').send("/* bye */"); 
+});
 app.get('/friend_request', async (req, res) => {
     const { user, pass, targetName, action } = req.query;
     const me = await validateUser(user, pass); if(!me) return res.type('application/javascript').send("0");
