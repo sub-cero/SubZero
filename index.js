@@ -5,20 +5,22 @@ const bcrypt = require('bcryptjs');
 const https = require('https');
 const app = express();
 
+// --- DB CONNECTION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V53: Login Rescue 🛡️")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V54: Login & Layout Fix 🛡️")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.set('trust proxy', 1);
 
+// --- ANTI-SLEEP ---
 app.get('/ping', (req, res) => { res.status(200).send('pong'); });
-
 setInterval(() => {
     https.get("https://subzero-hc18.onrender.com/ping", (res) => {}).on('error', (e) => console.error("Ping Error:", e.message));
 }, 30000);
 
+// --- SCHEMAS ---
 const UserSchema = new mongoose.Schema({
     username: { type: String, unique: true },
     pureName: { type: String, unique: true },
@@ -31,6 +33,7 @@ const UserSchema = new mongoose.Schema({
     status: { type: String, default: "User" },
     customStatus: { type: String, default: "Newcomer" },
     bio: { type: String, default: "No bio set." },
+    pfp: { type: String, default: "" }, 
     level: { type: Number, default: 1 },
     xp: { type: Number, default: 0 },
     messagesSent: { type: Number, default: 0 },
@@ -69,27 +72,25 @@ const IPBan = mongoose.model('IPBan', BanSchema);
 const Message = mongoose.model('Message', MessageSchema);
 const Config = mongoose.model('Config', ConfigSchema);
 
+// --- AUTH HELPER (SAFE) ---
 async function validateUser(inputName, plainPassword) {
     if(!inputName) return null;
     const cleanName = inputName.trim();
     
-    // Versuch 1: Suche nach pureName (Login Name)
+    // 1. Find User (by pure name OR full username)
     let user = await User.findOne({ pureName: cleanName.toLowerCase() });
-    
-    // Versuch 2: Suche nach Username (Voller Name)
     if (!user) user = await User.findOne({ username: cleanName });
 
-    if (!user) {
-        console.log("Login Failed: User not found ->", cleanName);
-        return null;
-    }
+    if (!user) return null;
 
     let isMatch = false;
-    // 1. Hash Check
+    
+    // 2. Check Password (Hash or Plaintext Migration)
     if (user.password && user.password.startsWith('$2a$')) {
+        // Modern Hash
         try { isMatch = await bcrypt.compare(plainPassword, user.password); } catch (e) { isMatch = false; }
     } else {
-        // 2. Plain Text Fallback (Migration)
+        // Legacy Plain Text (Auto-Migrate)
         if (user.password === plainPassword) {
             console.log(`Migrating password for ${user.username}`);
             const salt = await bcrypt.genSalt(10);
@@ -99,7 +100,6 @@ async function validateUser(inputName, plainPassword) {
         }
     }
 
-    if (!isMatch) console.log("Login Failed: Wrong Password for ->", cleanName);
     return isMatch ? user : null;
 }
 
@@ -129,10 +129,10 @@ setInterval(async () => {
 app.get('/auth', async (req, res) => {
     try {
         const { mode, user, pass, cb } = req.query;
-        // Robustere IP-Erkennung
+        // IP Logic: Get 2nd IP if available (Render Load Balancer)
         const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || "";
         const ipList = rawIp.split(',');
-        const realIp = ipList.length > 1 ? ipList[1].trim() : ipList[0].trim(); 
+        const realIp = ipList.length > 1 ? ipList[1].trim() : ipList[0].trim();
 
         const ipBanned = await IPBan.findOne({ ip: realIp });
         if (ipBanned) return res.send(`${cb}({success:false, msg:'IP_BANNED', isBanned: true});`);
@@ -148,8 +148,6 @@ app.get('/auth', async (req, res) => {
             if (existing) return res.send(`${cb}({success:false, msg:'Taken'});`);
             
             const hashedPassword = await bcrypt.hash(pass, 10);
-            
-            // AUTOMATISCHER ADMIN: Wenn es der allererste User ist ODER der Name "SuperAdmin" ist
             const userCount = await User.countDocuments({});
             const makeAdmin = (userCount === 0 || user.toLowerCase() === 'superadmin');
 
@@ -161,7 +159,7 @@ app.get('/auth', async (req, res) => {
             });
             return res.send(`${cb}({success:true, msg:'Created'});`);
         } else {
-            // LOGIN
+            // LOGIN FLOW
             const found = await validateUser(user, pass);
             
             if (!found) return res.send(`${cb}({success:false, msg:'Login failed'});`);
@@ -171,18 +169,20 @@ app.get('/auth', async (req, res) => {
                 else return res.send(`${cb}({success:false, msg: 'BANNED', isBanned: true, banExpires: found.banExpires});`); 
             }
             
-            found.lastIp = realIp; found.lastSeen = Date.now();
+            found.lastIp = realIp; 
+            found.lastSeen = Date.now();
+            
             if (!found.isOnlineNotify) {
                 if (found.isAdmin) await sysMsg("⚠️ THE ADMIN IS HERE! ⚠️", "#ff0000", "Main");
                 else await sysMsg(`${found.username} joined`, "#44ff44", "Main");
                 found.isOnlineNotify = true;
             }
+            // Ensure Arrays Exist
             if(!found.friends) found.friends = [];
             if(!found.friendRequests) found.friendRequests = [];
             
             await found.save();
             
-            // WICHTIG: Sende success:true zurück!
             return res.send(`${cb}({
                 success:true, 
                 user: "${found.username}", 
@@ -201,7 +201,6 @@ app.get('/auth', async (req, res) => {
     }
 });
 
-// RESTLICHE ENDPOINTS WIE GEHABT (nur gekürzt für Übersicht, Funktionalität identisch)
 app.get('/get_profile', async (req, res) => {
     const found = await User.findOne({ username: req.query.target });
     if (!found) return res.send(`${req.query.cb}({success:false});`);
@@ -334,7 +333,7 @@ app.get('/messages_jsonp', async (req, res) => {
     let projection = { userIp: 0 };
     if (requester && reqPass) {
         const admin = await validateUser(requester, reqPass);
-        if (admin && admin.isAdmin) projection = {}; 
+        if (admin && admin.isAdmin) projection = {}; // SHOW IP FOR ADMIN
     }
     const msgs = await Message.find({ room: req.query.room || "Main" }, projection).sort({ _id: -1 }).limit(50);
     res.send(`${req.query.callback}(${JSON.stringify(msgs.reverse())});`);
