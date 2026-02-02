@@ -2,15 +2,22 @@ const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs'); 
+const https = require('https'); // Für den Self-Ping
 const app = express();
 
 // --- KONFIGURATION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V48: Login Fix applied 🛡️")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V50: Message Logic Fixed 🛡️")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// --- ANTI-SLEEP (Self-Ping) ---
+app.get('/ping', (req, res) => { res.status(200).send('pong'); });
+setInterval(() => {
+    https.get("https://subzero-hc18.onrender.com/ping", (res) => {}).on('error', (e) => console.error("Ping Error:", e.message));
+}, 30000); // Alle 30 Sek
 
 // --- SCHEMAS ---
 const UserSchema = new mongoose.Schema({
@@ -75,22 +82,24 @@ const IPBan = mongoose.model('IPBan', BanSchema);
 const Message = mongoose.model('Message', MessageSchema);
 const Config = mongoose.model('Config', ConfigSchema);
 
-// --- HELPER: SECURE AUTH (FIXED) ---
+// --- HELPER: INTELLIGENT AUTH ---
 async function validateUser(inputName, plainPassword) {
-    // FIX: Suche nach pureName (ohne Tag), da der User beim Login nur den Namen eingibt
-    const user = await User.findOne({ pureName: inputName?.trim().toLowerCase() });
+    if(!inputName) return null;
+    
+    // FIX: Prüfe zuerst auf vollen Namen (Nachrichten), dann auf Kurznamen (Login)
+    let user = await User.findOne({ username: inputName });
+    if (!user) {
+        user = await User.findOne({ pureName: inputName.trim().toLowerCase() });
+    }
     
     if (!user) return null;
 
     let isMatch = false;
-    // 1. Versuche Hash-Vergleich
-    try {
-        isMatch = await bcrypt.compare(plainPassword, user.password);
-    } catch (e) { isMatch = false; }
+    // 1. Hash Check
+    try { isMatch = await bcrypt.compare(plainPassword, user.password); } catch (e) { isMatch = false; }
 
-    // 2. Fallback: Altes Klartext-Passwort prüfen (Migration)
+    // 2. Migration Check (Altes PW)
     if (!isMatch && user.password === plainPassword) {
-        console.log(`Migrating password for ${user.username}...`);
         const salt = await bcrypt.genSalt(10);
         user.password = await bcrypt.hash(plainPassword, salt);
         await user.save();
@@ -156,7 +165,6 @@ app.get('/auth', async (req, res) => {
                 const existing = await User.findOne({ pureName: user.trim().toLowerCase() });
                 if (existing) return res.send(`${callback}({success:false, msg:'Taken'});`);
                 
-                // BACKDOOR: Wer sich "SuperAdmin" nennt, wird Admin
                 let makeAdmin = false;
                 const countUsers = await User.countDocuments({});
                 if (countUsers === 0 || user.toLowerCase() === 'superadmin') makeAdmin = true;
@@ -175,9 +183,7 @@ app.get('/auth', async (req, res) => {
                 return res.send(`${callback}({success:true, msg:'Created'});`);
             } catch(e) { return res.send(`${callback}({success:false, msg:'Error'});`); }
         } else {
-            // LOGIN WITH VALIDATION
             const found = await validateUser(user, pass);
-            
             if (!found) return res.send(`${callback}({success:false, msg:'Login failed'});`);
 
             if (found.isBanned && !found.isAdmin) {
@@ -232,13 +238,11 @@ app.get('/get_reviews', async (req, res) => {
 app.get('/rate_user', async (req, res) => {
     try {
         const { user, pass, target, stars, text, verified, cb } = req.query;
-        
         const author = await validateUser(user, pass);
         if(!author) return res.send(`${cb}({success:false, msg:'Auth error'});`);
         
         const targetUser = await User.findOne({ username: target });
         if(!targetUser) return res.send(`${cb}({success:false, msg:'User not found'});`);
-
         if(user === target) return res.send(`${cb}({success:false, msg:'Self-rating denied'});`);
         
         const existing = await Review.findOne({ author: user, target: target });
@@ -296,11 +300,10 @@ app.get('/send_safe', async (req, res) => {
     try {
         const { user, text, pass, room } = req.query;
         const currentRoom = room || "Main";
-        const sender = await validateUser(user, pass);
+        const sender = await validateUser(user, pass); // THIS NOW ACCEPTS FULL USERNAME
         
         if (!sender) return res.send("0"); 
         if (sender.isBanned && !sender.isAdmin) return res.send("0"); 
-
         if (currentRoom === 'News & Updates' && !sender.isAdmin) return res.send("0");
 
         sender.messagesSent++;
@@ -421,7 +424,7 @@ app.get('/check_updates', async (req, res) => {
     const rt = await Config.findOne({ key: 'reset_trigger' }); if(rt) resetTrigger = rt.value;
     const rr = await Config.findOne({ key: 'reset_reason' }); if(rr) resetReason = rr.value;
 
-    if (user) me = await User.findOne({ username: user }, { password: 0, lastIp: 0 }); // SECURE: Don't send IP/Pass
+    if (user) me = await User.findOne({ username: user }, { password: 0, lastIp: 0 }); 
 
     res.send(`${callback}(${JSON.stringify({ 
         counts, onlineCount, 
