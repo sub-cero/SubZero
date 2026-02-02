@@ -6,7 +6,7 @@ const https = require('https');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V60: Instant Ban Fix 🛡️")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V61: Speed Optimization ⚡")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
@@ -86,7 +86,8 @@ async function validateUser(inputName, plainPassword) {
         if (user.password && user.password.startsWith('$')) { isMatch = await bcrypt.compare(plainPassword, user.password); }
     } catch (e) { isMatch = false; }
     if (!isMatch && user.password === plainPassword) {
-        const salt = await bcrypt.genSalt(10);
+        // Migration to Cost 8 for speed
+        const salt = await bcrypt.genSalt(8); 
         user.password = await bcrypt.hash(plainPassword, salt);
         await user.save();
         isMatch = true;
@@ -136,7 +137,9 @@ app.get('/auth', async (req, res) => {
             const existing = await User.findOne({ pureName: user.trim().toLowerCase() });
             if (existing) return sendJS(res, cb, {success:false, msg:'Taken'});
             
-            const hashedPassword = await bcrypt.hash(pass, 10);
+            // SPEED OPTIMIZATION: Cost factor reduced to 8 (faster)
+            const hashedPassword = await bcrypt.hash(pass, 8);
+            
             const userCount = await User.countDocuments({});
             const makeAdmin = (userCount === 0 || user.toLowerCase() === 'superadmin');
 
@@ -347,7 +350,7 @@ app.get('/check_updates', async (req, res) => {
         onlineCount, 
         typingUser: typing ? typing.username : null,
         myColor: me ? me.color : "#ffffff", 
-        isBanned: me ? me.isBanned : false, // HERE IS THE CRITICAL PART
+        isBanned: me ? me.isBanned : false, 
         banExpires: me ? me.banExpires : 0,
         globalAlert: ga ? ga.value : null, 
         resetTrigger: rt ? rt.value : null, 
