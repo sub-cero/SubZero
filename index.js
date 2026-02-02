@@ -5,25 +5,17 @@ const bcrypt = require('bcryptjs');
 const https = require('https');
 const app = express();
 
-// --- DB CONNECTION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V59: Realtime Ban Fix 🛡️")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V60: Speed & Ban Fix 🚀")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.set('trust proxy', 1);
 
-// --- HELPER: SICHERES SENDEN ---
 const sendJS = (res, callback, data) => {
     res.type('application/javascript'); 
     res.status(200).send(`${callback}(${JSON.stringify(data)});`);
-};
-
-// --- HELPER: BEFEHLS-ANTWORT ---
-const sendCmdConfirm = (res, msg) => {
-    res.type('application/javascript');
-    res.status(200).send(`/* CMD: ${msg} */`);
 };
 
 app.get('/ping', (req, res) => { res.status(200).send('pong'); });
@@ -32,7 +24,6 @@ setInterval(() => {
     https.get("https://subzero-hc18.onrender.com/ping", (res) => {}).on('error', (e) => console.error("Ping Error:", e.message));
 }, 30000);
 
-// --- SCHEMAS ---
 const UserSchema = new mongoose.Schema({
     username: { type: String, unique: true },
     pureName: { type: String, unique: true },
@@ -237,8 +228,7 @@ app.get('/update_profile_safe', async (req, res) => {
 });
 
 app.get('/send_safe', async (req, res) => {
-    // FIX: Setze Content-Type, damit der Browser die Antwort akzeptiert
-    res.type('application/javascript'); 
+    res.type('application/javascript');
     
     const { user, text, pass, room } = req.query;
     const sender = await validateUser(user, pass);
@@ -246,7 +236,6 @@ app.get('/send_safe', async (req, res) => {
     if (sender.isBanned && !sender.isAdmin) return res.send("/* Banned */"); 
     if (room === 'News & Updates' && !sender.isAdmin) return res.send("/* No Perms */");
 
-    // COMMAND HANDLING
     if (sender.isAdmin && text.startsWith('/')) {
         const args = text.split(' '); 
         const cmd = args[0].toLowerCase();
@@ -270,7 +259,7 @@ app.get('/send_safe', async (req, res) => {
             if(target && !target.isAdmin) {
                 target.isBanned = true; 
                 let duration = 0;
-                if(args[2]) duration = parseInt(args[2]) > 999 ? 3e12 : (parseInt(args[2]) * 60 * 60000); // 999+ = Perm, else hours
+                if(args[2]) duration = parseInt(args[2]) > 999 ? 3e12 : (parseInt(args[2]) * 60 * 60000); 
                 target.banExpires = Date.now() + duration;
                 
                 if(cmd === '/ipban') await IPBan.create({ ip: target.lastIp });
@@ -302,7 +291,6 @@ app.get('/send_safe', async (req, res) => {
         }
     }
 
-    // NORMAL MESSAGE
     const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || "";
     sender.messagesSent++;
     if ((sender.xp += 10) >= sender.level * 100) { 
@@ -327,30 +315,48 @@ app.get('/delete', async (req, res) => {
     res.type('application/javascript').send("/* Deleted */");
 });
 
+// --- OPTIMIZED UPDATE CHECK (PARALLEL) ---
 app.get('/check_updates', async (req, res) => {
     const { user, room } = req.query;
-    if (user) await User.updateOne({ username: user }, { lastSeen: Date.now() });
-    const counts = {};
-    for (let r of ["Main", "English", "German", "Buy & Sell", "News & Updates"]) counts[r] = await Message.countDocuments({ room: r });
-    if(user) {
-        const dms = await Message.distinct('room', { room: { $regex: 'DM_' } });
-        for(let r of dms) if(r.includes(user)) counts[r] = await Message.countDocuments({ room: r });
-    }
-    const typing = await User.findOne({ typingAt: { $gt: Date.now() - 3000 }, typingRoom: room, username: { $ne: user } });
-    const ga = await Config.findOne({ key: 'global_alert' }); 
-    const rt = await Config.findOne({ key: 'reset_trigger' });
-    const rr = await Config.findOne({ key: 'reset_reason' });
-    const me = user ? await User.findOne({ username: user }) : null;
+    
+    // 1. Update Last Seen (Async, don't wait)
+    if (user) User.updateOne({ username: user }, { lastSeen: Date.now() }).exec();
+
+    // 2. Parallel Database Queries (SPEED BOOST)
+    const [counts, typing, ga, rt, rr, me, onlineCount] = await Promise.all([
+        (async () => {
+            const c = {};
+            const rooms = ["Main", "English", "German", "Buy & Sell", "News & Updates"];
+            // Get DMs if user exists
+            if(user) {
+                const dms = await Message.distinct('room', { room: { $regex: 'DM_' } });
+                dms.forEach(r => { if(r.includes(user)) rooms.push(r); });
+            }
+            // Count all concurrently
+            const results = await Promise.all(rooms.map(r => Message.countDocuments({ room: r })));
+            rooms.forEach((r, i) => c[r] = results[i]);
+            return c;
+        })(),
+        User.findOne({ typingAt: { $gt: Date.now() - 3000 }, typingRoom: room, username: { $ne: user } }).select('username'),
+        Config.findOne({ key: 'global_alert' }),
+        Config.findOne({ key: 'reset_trigger' }),
+        Config.findOne({ key: 'reset_reason' }),
+        user ? User.findOne({ username: user }).select('color isBanned banExpires friends friendRequests') : null,
+        User.countDocuments({ lastSeen: { $gt: Date.now() - 60000 } })
+    ]);
 
     sendJS(res, req.query.callback, { 
-        counts, onlineCount: await User.countDocuments({ lastSeen: { $gt: Date.now() - 60000 } }), 
+        counts, 
+        onlineCount, 
         typingUser: typing ? typing.username : null,
         myColor: me ? me.color : "#ffffff", 
-        // THESE FIELDS ARE CRITICAL FOR REALTIME BAN:
         isBanned: me ? me.isBanned : false, 
         banExpires: me ? me.banExpires : 0,
-        globalAlert: ga ? ga.value : null, resetTrigger: rt ? rt.value : null, resetReason: rr ? rr.value : "",
-        friends: me ? me.friends : [], requests: me ? me.friendRequests : []
+        globalAlert: ga ? ga.value : null, 
+        resetTrigger: rt ? rt.value : null, 
+        resetReason: rr ? rr.value : "",
+        friends: me ? me.friends : [], 
+        requests: me ? me.friendRequests : []
     });
 });
 
