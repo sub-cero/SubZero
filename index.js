@@ -6,7 +6,7 @@ const https = require('https');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V60: Speed & Ban Fix 🚀")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V60: Instant Ban Fix 🛡️")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
@@ -315,24 +315,21 @@ app.get('/delete', async (req, res) => {
     res.type('application/javascript').send("/* Deleted */");
 });
 
-// --- OPTIMIZED UPDATE CHECK (PARALLEL) ---
 app.get('/check_updates', async (req, res) => {
     const { user, room } = req.query;
     
-    // 1. Update Last Seen (Async, don't wait)
+    // 1. Update Last Seen (Async)
     if (user) User.updateOne({ username: user }, { lastSeen: Date.now() }).exec();
 
-    // 2. Parallel Database Queries (SPEED BOOST)
+    // 2. Parallel Database Queries (Optimized for Speed)
     const [counts, typing, ga, rt, rr, me, onlineCount] = await Promise.all([
         (async () => {
             const c = {};
             const rooms = ["Main", "English", "German", "Buy & Sell", "News & Updates"];
-            // Get DMs if user exists
             if(user) {
                 const dms = await Message.distinct('room', { room: { $regex: 'DM_' } });
                 dms.forEach(r => { if(r.includes(user)) rooms.push(r); });
             }
-            // Count all concurrently
             const results = await Promise.all(rooms.map(r => Message.countDocuments({ room: r })));
             rooms.forEach((r, i) => c[r] = results[i]);
             return c;
@@ -350,7 +347,7 @@ app.get('/check_updates', async (req, res) => {
         onlineCount, 
         typingUser: typing ? typing.username : null,
         myColor: me ? me.color : "#ffffff", 
-        isBanned: me ? me.isBanned : false, 
+        isBanned: me ? me.isBanned : false, // HERE IS THE CRITICAL PART
         banExpires: me ? me.banExpires : 0,
         globalAlert: ga ? ga.value : null, 
         resetTrigger: rt ? rt.value : null, 
