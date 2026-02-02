@@ -7,17 +7,23 @@ const app = express();
 
 // --- DB CONNECTION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V57: Chat Fix 🚀")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V58: Commands Fix 🛡️")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.set('trust proxy', 1);
 
-// --- HELPER: SICHERES SENDEN ---
+// --- HELPER: SICHERES SENDEN (JSONP/Script) ---
 const sendJS = (res, callback, data) => {
     res.type('application/javascript'); 
     res.status(200).send(`${callback}(${JSON.stringify(data)});`);
+};
+
+// --- HELPER: BEFEHLS-ANTWORT ---
+const sendCmdConfirm = (res, msg) => {
+    res.type('application/javascript');
+    res.status(200).send(`/* CMD: ${msg} */`);
 };
 
 app.get('/ping', (req, res) => { res.status(200).send('pong'); });
@@ -26,6 +32,7 @@ setInterval(() => {
     https.get("https://subzero-hc18.onrender.com/ping", (res) => {}).on('error', (e) => console.error("Ping Error:", e.message));
 }, 30000);
 
+// --- SCHEMAS ---
 const UserSchema = new mongoose.Schema({
     username: { type: String, unique: true },
     pureName: { type: String, unique: true },
@@ -230,8 +237,8 @@ app.get('/update_profile_safe', async (req, res) => {
 });
 
 app.get('/send_safe', async (req, res) => {
-    // FIX: Setze Content-Type, damit der Browser die Antwort akzeptiert
-    res.type('application/javascript'); 
+    // CONTENT TYPE FIX: DAMIT COMMANDS GEHEN
+    res.type('application/javascript');
     
     const { user, text, pass, room } = req.query;
     const sender = await validateUser(user, pass);
@@ -239,36 +246,58 @@ app.get('/send_safe', async (req, res) => {
     if (sender.isBanned && !sender.isAdmin) return res.send("/* Banned */"); 
     if (room === 'News & Updates' && !sender.isAdmin) return res.send("/* No Perms */");
 
-    sender.messagesSent++;
-    if ((sender.xp += 10) >= sender.level * 100) { sender.level++; sender.xp = 0; await sysMsg(`${sender.username} reached Level ${sender.level}! ✨`, "#ffff00", room); }
-    await sender.save(); await User.findOneAndUpdate({ username: user }, { typingAt: 0 });
-
+    // COMMAND HANDLING
     if (sender.isAdmin && text.startsWith('/')) {
-        const args = text.split(' '); const cmd = args[0].toLowerCase();
+        const args = text.split(' '); 
+        const cmd = args[0].toLowerCase();
+        const targetName = args[1]; // Name from command
+
         if (cmd === '/alert') {
             await Config.findOneAndUpdate({ key: 'global_alert' }, { value: args.slice(1).join(' ') }, { upsert: true });
             setTimeout(async () => { await Config.deleteOne({ key: 'global_alert' }); }, 15000);
             return res.send("/* Alert Sent */");
         }
-        if (cmd === '/clear') { await Message.deleteMany({ room }); await sysMsg("CHAT CLEARED", "#ffff00", room); return res.send("/* Cleared */"); }
+        if (cmd === '/clear') { 
+            await Message.deleteMany({ room }); 
+            await sysMsg("CHAT CLEARED", "#ffff00", room); 
+            return res.send("/* Cleared */"); 
+        }
         if (cmd === '/ban' || cmd === '/ipban') {
-            const target = await User.findOne({ username: { $regex: `#${args[1]}$` } });
+            // Find EXACT Username OR User ending with TAG (e.g. #1234)
+            const target = await User.findOne({ 
+                $or: [{ username: targetName }, { username: new RegExp(targetName + "$", "i") }] 
+            });
+            
             if(target && !target.isAdmin) {
                 target.isBanned = true; 
-                target.banExpires = parseInt(args[2]) > 999 ? Date.now() + 3e12 : Date.now() + (parseInt(args[2]) * (args[2].startsWith('0')?60:1) * 60000);
+                // Calc duration
+                let duration = 0;
+                if(args[2]) duration = parseInt(args[2]) > 999 ? 3e12 : (parseInt(args[2]) * 60 * 60000); // 999+ = Perm, else hours
+                
+                target.banExpires = Date.now() + duration;
+                
                 if(cmd === '/ipban') await IPBan.create({ ip: target.lastIp });
                 await target.save();
-                await sysMsg(`${target.username} BANNED.`, "#ff0000", room);
+                await sysMsg(`${target.username} has been BANNED.`, "#ff0000", room);
             }
             return res.send("/* Banned */");
         }
         if (cmd === '/unban') {
-            const target = await User.findOne({ username: { $regex: `#${args[1]}$` } });
-            if(target) { target.isBanned = false; await target.save(); await IPBan.deleteMany({ ip: target.lastIp }); await sysMsg(`${target.username} UNBANNED.`, "#44ff44", room); }
+            const target = await User.findOne({ 
+                $or: [{ username: targetName }, { username: new RegExp(targetName + "$", "i") }] 
+            });
+            if(target) { 
+                target.isBanned = false; 
+                await target.save(); 
+                await IPBan.deleteMany({ ip: target.lastIp }); 
+                await sysMsg(`${target.username} has been UNBANNED.`, "#44ff44", room); 
+            }
             return res.send("/* Unbanned */");
         }
         if (cmd === '/reset') {
-            await Message.deleteMany({}); await User.deleteMany({ isAdmin: false }); await Review.deleteMany({});
+            await Message.deleteMany({}); 
+            await User.deleteMany({ isAdmin: false }); 
+            await Review.deleteMany({});
             await Config.findOneAndUpdate({ key: 'reset_trigger' }, { value: Date.now().toString() }, { upsert: true });
             await Config.findOneAndUpdate({ key: 'reset_reason' }, { value: args.slice(1).join(' ') || "Maintenance" }, { upsert: true });
             await sysMsg("SYSTEM RESET", "#ff0000", "Main", true);
@@ -276,7 +305,16 @@ app.get('/send_safe', async (req, res) => {
         }
     }
 
+    // NORMAL MESSAGE
     const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || "";
+    sender.messagesSent++;
+    if ((sender.xp += 10) >= sender.level * 100) { 
+        sender.level++; sender.xp = 0; 
+        await sysMsg(`${sender.username} reached Level ${sender.level}! ✨`, "#ffff00", room); 
+    }
+    await sender.save(); 
+    await User.findOneAndUpdate({ username: user }, { typingAt: 0 });
+    
     await Message.create({ 
         user, text, color: sender.color, status: sender.status, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 
         room: room || "Main", pfp: sender.pfp, userIp: rawIp, isVerified: sender.isVerified 
