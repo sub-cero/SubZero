@@ -376,7 +376,7 @@ app.get('/send_safe', async (req, res) => {
             isVerified: sender.isVerified 
         });
         res.send("1");
-    } catch(e) { res.send("0"); }
+    } catch(e) { console.log(e); res.send("0"); }
 });
 
 app.get('/delete', async (req, res) => {
