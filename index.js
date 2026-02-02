@@ -7,14 +7,14 @@ const app = express();
 
 // --- DB CONNECTION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V58: Commands Fix 🛡️")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V59: Realtime Ban Fix 🛡️")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.set('trust proxy', 1);
 
-// --- HELPER: SICHERES SENDEN (JSONP/Script) ---
+// --- HELPER: SICHERES SENDEN ---
 const sendJS = (res, callback, data) => {
     res.type('application/javascript'); 
     res.status(200).send(`${callback}(${JSON.stringify(data)});`);
@@ -237,8 +237,8 @@ app.get('/update_profile_safe', async (req, res) => {
 });
 
 app.get('/send_safe', async (req, res) => {
-    // CONTENT TYPE FIX: DAMIT COMMANDS GEHEN
-    res.type('application/javascript');
+    // FIX: Setze Content-Type, damit der Browser die Antwort akzeptiert
+    res.type('application/javascript'); 
     
     const { user, text, pass, room } = req.query;
     const sender = await validateUser(user, pass);
@@ -250,7 +250,7 @@ app.get('/send_safe', async (req, res) => {
     if (sender.isAdmin && text.startsWith('/')) {
         const args = text.split(' '); 
         const cmd = args[0].toLowerCase();
-        const targetName = args[1]; // Name from command
+        const targetName = args[1]; 
 
         if (cmd === '/alert') {
             await Config.findOneAndUpdate({ key: 'global_alert' }, { value: args.slice(1).join(' ') }, { upsert: true });
@@ -263,17 +263,14 @@ app.get('/send_safe', async (req, res) => {
             return res.send("/* Cleared */"); 
         }
         if (cmd === '/ban' || cmd === '/ipban') {
-            // Find EXACT Username OR User ending with TAG (e.g. #1234)
             const target = await User.findOne({ 
                 $or: [{ username: targetName }, { username: new RegExp(targetName + "$", "i") }] 
             });
             
             if(target && !target.isAdmin) {
                 target.isBanned = true; 
-                // Calc duration
                 let duration = 0;
                 if(args[2]) duration = parseInt(args[2]) > 999 ? 3e12 : (parseInt(args[2]) * 60 * 60000); // 999+ = Perm, else hours
-                
                 target.banExpires = Date.now() + duration;
                 
                 if(cmd === '/ipban') await IPBan.create({ ip: target.lastIp });
@@ -348,7 +345,10 @@ app.get('/check_updates', async (req, res) => {
     sendJS(res, req.query.callback, { 
         counts, onlineCount: await User.countDocuments({ lastSeen: { $gt: Date.now() - 60000 } }), 
         typingUser: typing ? typing.username : null,
-        myColor: me ? me.color : "#ffffff", isBanned: me ? me.isBanned : false, banExpires: me ? me.banExpires : 0,
+        myColor: me ? me.color : "#ffffff", 
+        // THESE FIELDS ARE CRITICAL FOR REALTIME BAN:
+        isBanned: me ? me.isBanned : false, 
+        banExpires: me ? me.banExpires : 0,
         globalAlert: ga ? ga.value : null, resetTrigger: rt ? rt.value : null, resetReason: rr ? rr.value : "",
         friends: me ? me.friends : [], requests: me ? me.friendRequests : []
     });
