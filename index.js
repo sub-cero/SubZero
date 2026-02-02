@@ -5,22 +5,26 @@ const bcrypt = require('bcryptjs');
 const https = require('https');
 const app = express();
 
-// --- DB CONNECTION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V55: Auth & Grid Fix 🛡️")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V56: MIME Type Fix 🛡️")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.set('trust proxy', 1);
 
-// --- ANTI-SLEEP ---
+// WICHTIG: Helper für JSONP Antworten mit korrektem Header
+const sendJS = (res, callback, data) => {
+    res.type('application/javascript'); // Zwingt Browser zur Ausführung
+    res.status(200).send(`${callback}(${JSON.stringify(data)});`);
+};
+
 app.get('/ping', (req, res) => { res.status(200).send('pong'); });
+
 setInterval(() => {
     https.get("https://subzero-hc18.onrender.com/ping", (res) => {}).on('error', (e) => console.error("Ping Error:", e.message));
 }, 30000);
 
-// --- SCHEMAS ---
 const UserSchema = new mongoose.Schema({
     username: { type: String, unique: true },
     pureName: { type: String, unique: true },
@@ -72,37 +76,22 @@ const IPBan = mongoose.model('IPBan', BanSchema);
 const Message = mongoose.model('Message', MessageSchema);
 const Config = mongoose.model('Config', ConfigSchema);
 
-// --- AUTH HELPER (ROBUST FIX) ---
 async function validateUser(inputName, plainPassword) {
     if(!inputName) return null;
     const cleanName = inputName.trim();
-    
-    // 1. Find User
     let user = await User.findOne({ pureName: cleanName.toLowerCase() });
     if (!user) user = await User.findOne({ username: cleanName });
-
     if (!user) return null;
-
     let isMatch = false;
-    
-    // 2. ROBUST PASSWORD CHECK (Works with $2a$, $2b$, $2y$ etc.)
     try {
-        if (user.password && user.password.startsWith('$')) {
-            isMatch = await bcrypt.compare(plainPassword, user.password);
-        }
-    } catch (e) {
-        isMatch = false;
-    }
-
-    // 3. Fallback / Migration for old accounts
+        if (user.password && user.password.startsWith('$')) { isMatch = await bcrypt.compare(plainPassword, user.password); }
+    } catch (e) { isMatch = false; }
     if (!isMatch && user.password === plainPassword) {
-        console.log(`Migrating password for ${user.username}`);
         const salt = await bcrypt.genSalt(10);
         user.password = await bcrypt.hash(plainPassword, salt);
         await user.save();
         isMatch = true;
     }
-
     return isMatch ? user : null;
 }
 
@@ -127,27 +116,26 @@ setInterval(async () => {
     } catch (e) {}
 }, 15000);
 
-// --- ENDPOINTS ---
-
 app.get('/auth', async (req, res) => {
+    const cb = req.query.cb || 'callback';
     try {
-        const { mode, user, pass, cb } = req.query;
+        const { mode, user, pass } = req.query;
         const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || "";
         const ipList = rawIp.split(',');
         const realIp = ipList.length > 1 ? ipList[1].trim() : ipList[0].trim();
 
         const ipBanned = await IPBan.findOne({ ip: realIp });
-        if (ipBanned) return res.send(`${cb}({success:false, msg:'IP_BANNED', isBanned: true});`);
+        if (ipBanned) return sendJS(res, cb, {success:false, msg:'IP_BANNED', isBanned: true});
 
         if (mode === 'check') {
             const pureName = user?.trim().toLowerCase();
             const existing = await User.findOne({ pureName });
-            return res.send(`${cb}(${JSON.stringify({ taken: !!existing, valid: user && user.length >= 5 })});`);
+            return sendJS(res, cb, { taken: !!existing, valid: user && user.length >= 5 });
         }
         
         if (mode === 'register') {
             const existing = await User.findOne({ pureName: user.trim().toLowerCase() });
-            if (existing) return res.send(`${cb}({success:false, msg:'Taken'});`);
+            if (existing) return sendJS(res, cb, {success:false, msg:'Taken'});
             
             const hashedPassword = await bcrypt.hash(pass, 10);
             const userCount = await User.countDocuments({});
@@ -159,21 +147,17 @@ app.get('/auth', async (req, res) => {
                 color: '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0'), 
                 lastIp: realIp, lastSeen: Date.now(), isAdmin: makeAdmin 
             });
-            return res.send(`${cb}({success:true, msg:'Created'});`);
+            return sendJS(res, cb, {success:true, msg:'Created'});
         } else {
-            // LOGIN FLOW
             const found = await validateUser(user, pass);
-            
-            if (!found) return res.send(`${cb}({success:false, msg:'Login failed'});`);
+            if (!found) return sendJS(res, cb, {success:false, msg:'Login failed'});
             
             if (found.isBanned && !found.isAdmin) {
                 if (found.banExpires > 0 && Date.now() > found.banExpires) { found.isBanned = false; await found.save(); } 
-                else return res.send(`${cb}({success:false, msg: 'BANNED', isBanned: true, banExpires: found.banExpires});`); 
+                else return sendJS(res, cb, {success:false, msg: 'BANNED', isBanned: true, banExpires: found.banExpires}); 
             }
             
-            found.lastIp = realIp; 
-            found.lastSeen = Date.now();
-            
+            found.lastIp = realIp; found.lastSeen = Date.now();
             if (!found.isOnlineNotify) {
                 if (found.isAdmin) await sysMsg("⚠️ THE ADMIN IS HERE! ⚠️", "#ff0000", "Main");
                 else await sysMsg(`${found.username} joined`, "#44ff44", "Main");
@@ -181,49 +165,44 @@ app.get('/auth', async (req, res) => {
             }
             if(!found.friends) found.friends = [];
             if(!found.friendRequests) found.friendRequests = [];
-            
             await found.save();
             
-            return res.send(`${cb}({
+            return sendJS(res, cb, {
                 success:true, 
-                user: "${found.username}", 
-                color: "${found.color}", 
-                isAdmin: ${found.isAdmin}, 
-                status: "${found.status}", 
-                pfp: "${found.pfp || ""}", 
-                isVerified: ${found.isVerified || false}, 
-                friends: ${JSON.stringify(found.friends)}, 
-                requests: ${JSON.stringify(found.friendRequests)}
-            });`);
+                user: found.username, 
+                color: found.color, 
+                isAdmin: found.isAdmin, 
+                status: found.status, 
+                pfp: found.pfp || "", 
+                isVerified: found.isVerified || false, 
+                friends: found.friends, 
+                requests: found.friendRequests
+            });
         }
     } catch(e) { 
         console.error(e);
-        res.send(`${req.query.cb}({success:false, msg:'Server Error'});`); 
+        sendJS(res, cb, {success:false, msg:'Server Error'}); 
     }
 });
 
-// ... REST DES CODES BLEIBT GLEICH ...
-// (Lass den Rest so wie er war, nur validateUser und /auth wurden gehärtet)
-// Hier der Rest für Copy Paste Sicherheit:
-
 app.get('/get_profile', async (req, res) => {
     const found = await User.findOne({ username: req.query.target });
-    if (!found) return res.send(`${req.query.cb}({success:false});`);
+    if (!found) return sendJS(res, req.query.cb, {success:false});
     const avg = found.ratingCount > 0 ? (found.ratingSum / found.ratingCount).toFixed(1) : "0.0";
-    res.send(`${req.query.cb}(${JSON.stringify({ username: found.username, color: found.color, isAdmin: found.isAdmin, status: found.status, customStatus: found.customStatus, bio: found.bio, level: found.level, messages: found.messagesSent, joinedAt: new Date(found.joinedAt).toLocaleDateString(), isOnline: found.lastSeen > Date.now() - 60000, isVerified: found.isVerified, ratingAvg: avg, ratingCount: found.ratingCount })});`);
+    sendJS(res, req.query.cb, { username: found.username, color: found.color, isAdmin: found.isAdmin, status: found.status, customStatus: found.customStatus, bio: found.bio, level: found.level, messages: found.messagesSent, joinedAt: new Date(found.joinedAt).toLocaleDateString(), isOnline: found.lastSeen > Date.now() - 60000, isVerified: found.isVerified, ratingAvg: avg, ratingCount: found.ratingCount });
 });
 
 app.get('/get_reviews', async (req, res) => {
     const reviews = await Review.find({ target: req.query.target }).sort({ isVerified: -1, date: -1 }).limit(20);
-    res.send(`${req.query.cb}(${JSON.stringify(reviews)});`);
+    sendJS(res, req.query.cb, reviews);
 });
 
 app.get('/rate_user', async (req, res) => {
     const { user, pass, target, stars, text, verified, cb } = req.query;
     const author = await validateUser(user, pass);
-    if(!author) return res.send(`${cb}({success:false});`);
+    if(!author) return sendJS(res, cb, {success:false});
     const targetUser = await User.findOne({ username: target });
-    if(user === target || !targetUser) return res.send(`${cb}({success:false});`);
+    if(user === target || !targetUser) return sendJS(res, cb, {success:false});
     
     let isVer = false;
     if(author.isAdmin) {
@@ -233,23 +212,24 @@ app.get('/rate_user', async (req, res) => {
     }
     await Review.create({ target, author: user, stars: parseInt(stars), text: text || "", isVerified: isVer, date: Date.now() });
     await recalcRatings(target);
-    res.send(`${cb}({success:true});`);
+    sendJS(res, cb, {success:true});
 });
 
 app.get('/delete_review', async (req, res) => {
     const admin = await validateUser(req.query.user, req.query.pass);
-    if(!admin || !admin.isAdmin) return res.send(`${req.query.cb}({success:false});`);
-    const r = await Review.findByIdAndDelete(req.query.id);
-    if(r) await recalcRatings(r.target);
-    res.send(`${req.query.cb}({success:true});`);
+    if(!admin || !admin.isAdmin) return sendJS(res, req.query.cb, {success:false});
+    await Review.findByIdAndDelete(req.query.id);
+    await recalcRatings(req.query.target); // Fixed: target needed
+    sendJS(res, req.query.cb, {success:true});
 });
 
 app.get('/update_profile_safe', async (req, res) => {
     await User.updateOne({ username: req.query.user }, { $set: { bio: req.query.bio, color: req.query.color } });
-    res.send(`${req.query.cb}({success:true, color:req.query.color});`);
+    sendJS(res, req.query.cb, {success:true, color:req.query.color});
 });
 
 app.get('/send_safe', async (req, res) => {
+    // Keep this as plain text/numeric for lightweight sending
     const { user, text, pass, room } = req.query;
     const sender = await validateUser(user, pass);
     if (!sender) return res.send("0"); 
@@ -324,13 +304,13 @@ app.get('/check_updates', async (req, res) => {
     const rr = await Config.findOne({ key: 'reset_reason' });
     const me = user ? await User.findOne({ username: user }) : null;
 
-    res.send(`${req.query.callback}(${JSON.stringify({ 
+    sendJS(res, req.query.callback, { 
         counts, onlineCount: await User.countDocuments({ lastSeen: { $gt: Date.now() - 60000 } }), 
         typingUser: typing ? typing.username : null,
         myColor: me ? me.color : "#ffffff", isBanned: me ? me.isBanned : false, banExpires: me ? me.banExpires : 0,
         globalAlert: ga ? ga.value : null, resetTrigger: rt ? rt.value : null, resetReason: rr ? rr.value : "",
         friends: me ? me.friends : [], requests: me ? me.friendRequests : []
-    })});`);
+    });
 });
 
 app.get('/messages_jsonp', async (req, res) => {
@@ -341,7 +321,7 @@ app.get('/messages_jsonp', async (req, res) => {
         if (admin && admin.isAdmin) projection = {}; 
     }
     const msgs = await Message.find({ room: req.query.room || "Main" }, projection).sort({ _id: -1 }).limit(50);
-    res.send(`${req.query.callback}(${JSON.stringify(msgs.reverse())});`);
+    sendJS(res, req.query.callback, msgs.reverse());
 });
 
 app.get('/typing', async (req, res) => { await User.findOneAndUpdate({ username: req.query.user }, { typingAt: Date.now(), typingRoom: req.query.room }); res.send("1"); });
