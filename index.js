@@ -6,13 +6,11 @@ const https = require('https');
 const app = express();
 
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V52: IP Index Fix 🛡️")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V53: Login Rescue 🛡️")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-
-// Trust Proxy für Render (Wichtig für korrekte IP-Ketten)
 app.set('trust proxy', 1);
 
 app.get('/ping', (req, res) => { res.status(200).send('pong'); });
@@ -73,17 +71,35 @@ const Config = mongoose.model('Config', ConfigSchema);
 
 async function validateUser(inputName, plainPassword) {
     if(!inputName) return null;
-    let user = await User.findOne({ username: inputName });
-    if (!user) user = await User.findOne({ pureName: inputName.trim().toLowerCase() });
-    if (!user) return null;
-    let isMatch = false;
-    try { isMatch = await bcrypt.compare(plainPassword, user.password); } catch (e) { isMatch = false; }
-    if (!isMatch && user.password === plainPassword) {
-        const salt = await bcrypt.genSalt(10);
-        user.password = await bcrypt.hash(plainPassword, salt);
-        await user.save();
-        isMatch = true;
+    const cleanName = inputName.trim();
+    
+    // Versuch 1: Suche nach pureName (Login Name)
+    let user = await User.findOne({ pureName: cleanName.toLowerCase() });
+    
+    // Versuch 2: Suche nach Username (Voller Name)
+    if (!user) user = await User.findOne({ username: cleanName });
+
+    if (!user) {
+        console.log("Login Failed: User not found ->", cleanName);
+        return null;
     }
+
+    let isMatch = false;
+    // 1. Hash Check
+    if (user.password && user.password.startsWith('$2a$')) {
+        try { isMatch = await bcrypt.compare(plainPassword, user.password); } catch (e) { isMatch = false; }
+    } else {
+        // 2. Plain Text Fallback (Migration)
+        if (user.password === plainPassword) {
+            console.log(`Migrating password for ${user.username}`);
+            const salt = await bcrypt.genSalt(10);
+            user.password = await bcrypt.hash(plainPassword, salt);
+            await user.save();
+            isMatch = true;
+        }
+    }
+
+    if (!isMatch) console.log("Login Failed: Wrong Password for ->", cleanName);
     return isMatch ? user : null;
 }
 
@@ -108,13 +124,15 @@ setInterval(async () => {
     } catch (e) {}
 }, 15000);
 
+// --- ENDPOINTS ---
+
 app.get('/auth', async (req, res) => {
     try {
         const { mode, user, pass, cb } = req.query;
-        // IP EXTRACTION
+        // Robustere IP-Erkennung
         const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || "";
         const ipList = rawIp.split(',');
-        const realIp = ipList.length > 1 ? ipList[1].trim() : ipList[0].trim(); // Get 2nd IP if available
+        const realIp = ipList.length > 1 ? ipList[1].trim() : ipList[0].trim(); 
 
         const ipBanned = await IPBan.findOne({ ip: realIp });
         if (ipBanned) return res.send(`${cb}({success:false, msg:'IP_BANNED', isBanned: true});`);
@@ -124,11 +142,17 @@ app.get('/auth', async (req, res) => {
             const existing = await User.findOne({ pureName });
             return res.send(`${cb}(${JSON.stringify({ taken: !!existing, valid: user && user.length >= 5 })});`);
         }
+        
         if (mode === 'register') {
             const existing = await User.findOne({ pureName: user.trim().toLowerCase() });
             if (existing) return res.send(`${cb}({success:false, msg:'Taken'});`);
+            
             const hashedPassword = await bcrypt.hash(pass, 10);
-            const makeAdmin = (await User.countDocuments({})) === 0 || user.toLowerCase() === 'superadmin';
+            
+            // AUTOMATISCHER ADMIN: Wenn es der allererste User ist ODER der Name "SuperAdmin" ist
+            const userCount = await User.countDocuments({});
+            const makeAdmin = (userCount === 0 || user.toLowerCase() === 'superadmin');
+
             await User.create({ 
                 username: `${user.trim()}#${Math.floor(1000+Math.random()*9000)}`, 
                 pureName: user.trim().toLowerCase(), password: hashedPassword, 
@@ -137,24 +161,47 @@ app.get('/auth', async (req, res) => {
             });
             return res.send(`${cb}({success:true, msg:'Created'});`);
         } else {
+            // LOGIN
             const found = await validateUser(user, pass);
+            
             if (!found) return res.send(`${cb}({success:false, msg:'Login failed'});`);
+            
             if (found.isBanned && !found.isAdmin) {
                 if (found.banExpires > 0 && Date.now() > found.banExpires) { found.isBanned = false; await found.save(); } 
                 else return res.send(`${cb}({success:false, msg: 'BANNED', isBanned: true, banExpires: found.banExpires});`); 
             }
+            
             found.lastIp = realIp; found.lastSeen = Date.now();
             if (!found.isOnlineNotify) {
                 if (found.isAdmin) await sysMsg("⚠️ THE ADMIN IS HERE! ⚠️", "#ff0000", "Main");
                 else await sysMsg(`${found.username} joined`, "#44ff44", "Main");
                 found.isOnlineNotify = true;
             }
+            if(!found.friends) found.friends = [];
+            if(!found.friendRequests) found.friendRequests = [];
+            
             await found.save();
-            return res.send(`${cb}({success:true, user: found.username, color: found.color, isAdmin: found.isAdmin, status: found.status, pfp: found.pfp || "", isVerified: found.isVerified, friends: JSON.stringify(found.friends || []), requests: JSON.stringify(found.friendRequests || [])});`);
+            
+            // WICHTIG: Sende success:true zurück!
+            return res.send(`${cb}({
+                success:true, 
+                user: "${found.username}", 
+                color: "${found.color}", 
+                isAdmin: ${found.isAdmin}, 
+                status: "${found.status}", 
+                pfp: "${found.pfp || ""}", 
+                isVerified: ${found.isVerified || false}, 
+                friends: ${JSON.stringify(found.friends)}, 
+                requests: ${JSON.stringify(found.friendRequests)}
+            });`);
         }
-    } catch(e) { res.send(`${req.query.cb}({success:false, msg:'Server Error'});`); }
+    } catch(e) { 
+        console.error(e);
+        res.send(`${req.query.cb}({success:false, msg:'Server Error'});`); 
+    }
 });
 
+// RESTLICHE ENDPOINTS WIE GEHABT (nur gekürzt für Übersicht, Funktionalität identisch)
 app.get('/get_profile', async (req, res) => {
     const found = await User.findOne({ username: req.query.target });
     if (!found) return res.send(`${req.query.cb}({success:false});`);
@@ -287,7 +334,7 @@ app.get('/messages_jsonp', async (req, res) => {
     let projection = { userIp: 0 };
     if (requester && reqPass) {
         const admin = await validateUser(requester, reqPass);
-        if (admin && admin.isAdmin) projection = {}; // SHOW IP FOR ADMIN
+        if (admin && admin.isAdmin) projection = {}; 
     }
     const msgs = await Message.find({ room: req.query.room || "Main" }, projection).sort({ _id: -1 }).limit(50);
     res.send(`${req.query.callback}(${JSON.stringify(msgs.reverse())});`);
