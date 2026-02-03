@@ -5,15 +5,16 @@ const bcrypt = require('bcryptjs');
 const https = require('https');
 const app = express();
 
+// --- DB CONNECTION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V62: Chat & System Msgs Fix 🚀")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V63: Chat & System Fix 🚀")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.set('trust proxy', 1);
 
-// --- HELPER ---
+// --- HELPER: SICHERES SENDEN ---
 const sendJS = (res, callback, data) => {
     res.type('application/javascript'); 
     res.status(200).send(`${callback}(${JSON.stringify(data)});`);
@@ -113,18 +114,17 @@ async function sysMsg(text, color = "#44ff44", room = "Main", isReset = false, r
     } catch (e) { console.error("SysMsg Error", e); }
 }
 
-// CHECK OFFLINE USERS
+// CHECK OFFLINE USERS (Every 10s)
 setInterval(async () => {
     try {
         const minuteAgo = Date.now() - 60000;
         const lostUsers = await User.find({ lastSeen: { $lt: minuteAgo }, isOnlineNotify: true });
         for (let u of lostUsers) {
-            // Send leave message to Main room by default so everyone sees it
-            await sysMsg(`${u.username} left the room.`, "#ff4444", "Main");
+            await sysMsg(`${u.username} left.`, "#ff4444", "Main");
             u.isOnlineNotify = false; await u.save();
         }
     } catch (e) {}
-}, 10000); // Check every 10s
+}, 10000); 
 
 app.get('/auth', async (req, res) => {
     const cb = req.query.cb || 'callback';
@@ -169,10 +169,10 @@ app.get('/auth', async (req, res) => {
             
             found.lastIp = realIp; found.lastSeen = Date.now();
             
-            // JOIN MESSAGE LOGIC
+            // Trigger Join Message if coming online
             if (!found.isOnlineNotify) {
                 if (found.isAdmin) await sysMsg("⚠️ THE ADMIN IS HERE! ⚠️", "#ff0000", "Main");
-                else await sysMsg(`${found.username} joined`, "#44ff44", "Main");
+                else await sysMsg(`${found.username} joined.`, "#44ff44", "Main");
                 found.isOnlineNotify = true;
             }
             
@@ -242,12 +242,10 @@ app.get('/update_profile_safe', async (req, res) => {
 });
 
 app.get('/send_safe', async (req, res) => {
-    res.type('application/javascript'); // IMPORTANT FOR BROWSER
+    res.type('application/javascript'); 
     
     const { user, text, pass, room } = req.query;
     const sender = await validateUser(user, pass);
-    
-    // Always return VALID JS, even on error, to stop browser from hanging
     if (!sender) return res.send("/* Auth Failed */"); 
     if (sender.isBanned && !sender.isAdmin) return res.send("/* Banned */"); 
     if (room === 'News & Updates' && !sender.isAdmin) return res.send("/* No Perms */");
@@ -333,7 +331,6 @@ app.get('/delete', async (req, res) => {
 
 app.get('/check_updates', async (req, res) => {
     const { user, room } = req.query;
-    
     if (user) User.updateOne({ username: user }, { lastSeen: Date.now() }).exec();
 
     const [counts, typing, ga, rt, rr, me, onlineCount] = await Promise.all([
@@ -357,17 +354,11 @@ app.get('/check_updates', async (req, res) => {
     ]);
 
     sendJS(res, req.query.callback, { 
-        counts, 
-        onlineCount, 
-        typingUser: typing ? typing.username : null,
+        counts, onlineCount, typingUser: typing ? typing.username : null,
         myColor: me ? me.color : "#ffffff", 
-        isBanned: me ? me.isBanned : false, 
-        banExpires: me ? me.banExpires : 0,
-        globalAlert: ga ? ga.value : null, 
-        resetTrigger: rt ? rt.value : null, 
-        resetReason: rr ? rr.value : "",
-        friends: me ? me.friends : [], 
-        requests: me ? me.friendRequests : []
+        isBanned: me ? me.isBanned : false, banExpires: me ? me.banExpires : 0,
+        globalAlert: ga ? ga.value : null, resetTrigger: rt ? rt.value : null, resetReason: rr ? rr.value : "",
+        friends: me ? me.friends : [], requests: me ? me.friendRequests : []
     });
 });
 
@@ -384,9 +375,7 @@ app.get('/messages_jsonp', async (req, res) => {
 
 app.get('/typing', async (req, res) => { await User.findOneAndUpdate({ username: req.query.user }, { typingAt: Date.now(), typingRoom: req.query.room }); res.type('application/javascript').send("/* typing */"); });
 app.get('/logout_notify', async (req, res) => { 
-    // Trigger leave message
     await sysMsg(`${req.query.user} left.`, "#ff4444", req.query.room); 
-    // Update DB so user isn't shown as online
     await User.updateOne({ username: req.query.user }, { isOnlineNotify: false, lastSeen: 0 });
     res.type('application/javascript').send("/* bye */"); 
 });
