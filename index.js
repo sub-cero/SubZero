@@ -5,14 +5,16 @@ const bcrypt = require('bcryptjs');
 const https = require('https');
 const app = express();
 
+// --- DB CONNECTION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V67: Final Reset Fix 🛡️")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V67: Reset Logic Update 🛡️")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.set('trust proxy', 1);
 
+// --- HELPER: SICHERES SENDEN ---
 const sendJS = (res, callback, data) => {
     res.type('application/javascript'); 
     res.status(200).send(`${callback}(${JSON.stringify(data)});`);
@@ -24,6 +26,7 @@ setInterval(() => {
     https.get("https://subzero-hc18.onrender.com/ping", (res) => {}).on('error', (e) => console.error("Ping Error:", e.message));
 }, 30000);
 
+// --- SCHEMAS ---
 const UserSchema = new mongoose.Schema({
     username: { type: String, unique: true },
     pureName: { type: String, unique: true },
@@ -283,11 +286,15 @@ app.get('/send_safe', async (req, res) => {
             return res.send("/* Unbanned */");
         }
         if (cmd === '/reset') {
-            await Message.deleteMany({}); 
+            // FIX: KEEP NEWS & UPDATES, DELETE EVERYTHING ELSE
+            await Message.deleteMany({ room: { $ne: "News & Updates" } }); 
+            
             await User.deleteMany({ isAdmin: false }); 
             await Review.deleteMany({});
+            
             await Config.findOneAndUpdate({ key: 'reset_trigger' }, { value: Date.now().toString() }, { upsert: true });
             await Config.findOneAndUpdate({ key: 'reset_reason' }, { value: args.slice(1).join(' ') || "Maintenance" }, { upsert: true });
+            
             await sysMsg("SYSTEM RESET", "#ff0000", "Main", true);
             return res.send("/* Reset */");
         }
