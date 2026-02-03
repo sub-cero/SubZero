@@ -7,14 +7,13 @@ const app = express();
 
 // --- DB CONNECTION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V63: Chat & System Fix 🚀")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V64: Instant Chat Fix 🚀")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.set('trust proxy', 1);
 
-// --- HELPER: SICHERES SENDEN ---
 const sendJS = (res, callback, data) => {
     res.type('application/javascript'); 
     res.status(200).send(`${callback}(${JSON.stringify(data)});`);
@@ -26,7 +25,6 @@ setInterval(() => {
     https.get("https://subzero-hc18.onrender.com/ping", (res) => {}).on('error', (e) => console.error("Ping Error:", e.message));
 }, 30000);
 
-// --- SCHEMAS ---
 const UserSchema = new mongoose.Schema({
     username: { type: String, unique: true },
     pureName: { type: String, unique: true },
@@ -103,24 +101,16 @@ async function recalcRatings(username) {
     await User.updateOne({ username: username }, { ratingSum: sum, ratingCount: reviews.length });
 }
 
-// SYSTEM MESSAGE HELPER (JOIN/LEAVE)
 async function sysMsg(text, color = "#44ff44", room = "Main", isReset = false, reason = "") {
-    try { 
-        await Message.create({ 
-            user: "SYSTEM", text, color, status: "SYS", 
-            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 
-            isSystem: true, room: room || "Main", isReset, resetReason: reason 
-        }); 
-    } catch (e) { console.error("SysMsg Error", e); }
+    try { await Message.create({ user: "SYSTEM", text, color, status: "SYS", time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), isSystem: true, room: room || "Main", isReset, resetReason: reason }); } catch (e) {}
 }
 
-// CHECK OFFLINE USERS (Every 10s)
 setInterval(async () => {
     try {
         const minuteAgo = Date.now() - 60000;
         const lostUsers = await User.find({ lastSeen: { $lt: minuteAgo }, isOnlineNotify: true });
         for (let u of lostUsers) {
-            await sysMsg(`${u.username} left.`, "#ff4444", "Main");
+            await sysMsg(`${u.username} left the room.`, "#ff4444", "Main");
             u.isOnlineNotify = false; await u.save();
         }
     } catch (e) {}
@@ -169,7 +159,6 @@ app.get('/auth', async (req, res) => {
             
             found.lastIp = realIp; found.lastSeen = Date.now();
             
-            // Trigger Join Message if coming online
             if (!found.isOnlineNotify) {
                 if (found.isAdmin) await sysMsg("⚠️ THE ADMIN IS HERE! ⚠️", "#ff0000", "Main");
                 else await sysMsg(`${found.username} joined.`, "#44ff44", "Main");
