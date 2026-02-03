@@ -5,9 +5,8 @@ const bcrypt = require('bcryptjs');
 const https = require('https');
 const app = express();
 
-// --- DB CONNECTION ---
 const mongoURI = "mongodb+srv://Smyle:stranac55@cluster0.qnqljpv.mongodb.net/?appName=Cluster0"; 
-mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V64: Instant Chat Fix 🚀")).catch(err => console.error("DB Error:", err));
+mongoose.connect(mongoURI).then(() => console.log("Sub-Zero V65: Anti-Flicker 🛡️")).catch(err => console.error("DB Error:", err));
 
 app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '50mb' }));
@@ -110,7 +109,7 @@ setInterval(async () => {
         const minuteAgo = Date.now() - 60000;
         const lostUsers = await User.find({ lastSeen: { $lt: minuteAgo }, isOnlineNotify: true });
         for (let u of lostUsers) {
-            await sysMsg(`${u.username} left the room.`, "#ff4444", "Main");
+            await sysMsg(`${u.username} left.`, "#ff4444", "Main");
             u.isOnlineNotify = false; await u.save();
         }
     } catch (e) {}
